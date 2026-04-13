@@ -1,0 +1,5 @@
+{
+  "name": "BC-Analyzer",
+  "description": "A Business Capability Analyzer with role-based access control and Firebase backend.",
+  "requestFramePermissions": []
+}

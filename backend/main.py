@@ -1,0 +1,482 @@
+"""
+Main FastAPI Application — Multi-Agent Business Capability Analyzer
+
+Phase 6 Prompt: "Update main.py to wire the LangGraph orchestrator into the
+/api/initiate and /api/approve endpoints. POST /api/initiate accepts the
+Opportunity Canvas text as JSON, runs the Master Agent to extract 5 core
+assumptions, and returns them for human review. POST /api/approve accepts
+the human's approval along with the original input and assumptions, triggers
+the full parallel fan-out pipeline with QA validation, and returns the final
+verified Markdown presentation. Both endpoints require authentication via
+the existing get_current_user dependency."
+
+Run with: uvicorn main:app --reload
+"""
+
+import os
+from fastapi import FastAPI, Depends, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+from typing import Optional
+from dotenv import load_dotenv
+
+from app.auth import (
+    RegisterRequest,
+    LoginRequest,
+    AuthResponse,
+    UserInfo,
+    get_current_user,
+    register_user,
+    login_user,
+)
+from app.database import (
+    add_capabilities,
+    get_all_capabilities,
+    add_products,
+    get_all_products,
+    add_journeys,
+    get_all_journeys,
+    add_value_streams,
+    get_all_value_streams,
+)
+
+load_dotenv()
+
+app = FastAPI(
+    title="Multi-Agent Business Capability Analyzer",
+    version="1.0.0",
+    description="LangGraph-powered multi-agent system for enterprise capability analysis.",
+)
+
+# CORS — allow frontend to connect (adjust origins for production)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+# ══════════════════════════════════════════════════════════════════════
+# PUBLIC ENDPOINTS — No authentication required
+# ══════════════════════════════════════════════════════════════════════
+
+
+@app.get("/")
+async def root():
+    return {"status": "running", "app": "Multi-Agent Business Analyzer"}
+
+
+@app.get("/health")
+async def health_check():
+    return {"status": "healthy"}
+
+
+# ══════════════════════════════════════════════════════════════════════
+# AUTH ENDPOINTS — Registration & Login
+# ══════════════════════════════════════════════════════════════════════
+
+
+@app.post("/api/auth/register", response_model=AuthResponse)
+async def register(req: RegisterRequest):
+    """Register a new user with email and password."""
+    return await register_user(req)
+
+
+@app.post("/api/auth/login", response_model=AuthResponse)
+async def login(req: LoginRequest):
+    """Log in an existing user and return an ID token."""
+    return await login_user(req)
+
+
+@app.get("/api/auth/me")
+async def get_me(user: UserInfo = Depends(get_current_user)):
+    """Return the authenticated user's info (tests token verification)."""
+    return {"user_id": user.user_id, "email": user.email}
+
+
+# ══════════════════════════════════════════════════════════════════════
+# CONFIG ENDPOINTS — User-specific knowledge base data
+# These accept web form JSON payloads and write to Firestore
+# ══════════════════════════════════════════════════════════════════════
+
+
+class CapabilitiesPayload(BaseModel):
+    capabilities: list[dict]
+
+
+class ProductsPayload(BaseModel):
+    products: list[dict]
+
+
+class JourneysPayload(BaseModel):
+    journeys: list[dict]
+
+class ValueStreamsPayload(BaseModel):
+    value_streams: list[dict]
+
+
+# ── Capabilities ─────────────────────────────────────────────────────
+
+
+@app.post("/api/config/capabilities")
+async def upload_capabilities(
+    payload: CapabilitiesPayload,
+    user: UserInfo = Depends(get_current_user),
+):
+    """Upload capability records to the user's Firestore knowledge base."""
+    count = add_capabilities(user.user_id, payload.capabilities)
+    return {"message": f"{count} capabilities saved.", "user_id": user.user_id}
+
+
+@app.get("/api/config/capabilities")
+async def list_capabilities(user: UserInfo = Depends(get_current_user)):
+    """Retrieve all capabilities for the authenticated user."""
+    caps = list(get_all_capabilities(user.user_id))
+    return {"capabilities": [c.to_dict() | {"id": c.id} for c in caps], "count": len(caps)}
+
+
+# ── Products ─────────────────────────────────────────────────────────
+
+
+@app.post("/api/config/products")
+async def upload_products(
+    payload: ProductsPayload,
+    user: UserInfo = Depends(get_current_user),
+):
+    """Upload product/system records to the user's Firestore knowledge base."""
+    count = add_products(user.user_id, payload.products)
+    return {"message": f"{count} products saved.", "user_id": user.user_id}
+
+
+@app.get("/api/config/products")
+async def list_products(user: UserInfo = Depends(get_current_user)):
+    """Retrieve all products for the authenticated user."""
+    prods = list(get_all_products(user.user_id))
+    return {"products": [p.to_dict() | {"id": p.id} for p in prods], "count": len(prods)}
+
+
+# ── Journeys ─────────────────────────────────────────────────────────
+
+
+@app.post("/api/config/journeys")
+async def upload_journeys(
+    payload: JourneysPayload,
+    user: UserInfo = Depends(get_current_user),
+):
+    """Upload journey framework records to the user's Firestore knowledge base."""
+    count = add_journeys(user.user_id, payload.journeys)
+    return {"message": f"{count} journeys saved.", "user_id": user.user_id}
+
+
+@app.get("/api/config/journeys")
+async def list_journeys(user: UserInfo = Depends(get_current_user)):
+    """Retrieve all journeys for the authenticated user."""
+    journeys = list(get_all_journeys(user.user_id))
+    return {"journeys": [j.to_dict() | {"id": j.id} for j in journeys], "count": len(journeys)}
+
+
+# ══════════════════════════════════════════════════════════════════════
+
+# ─── Value Streams ────────────────────────────────────────────────────────
+
+@app.post("/api/config/value_streams")
+async def upload_value_streams(
+    payload: ValueStreamsPayload,
+    user: UserInfo = Depends(get_current_user),
+):
+    """Upload value stream records to the user's Firestore knowledge base."""
+    count = add_value_streams(user.user_id, payload.value_streams)
+    return {"message": f"{count} value streams saved.", "user_id": user.user_id}
+
+
+@app.get("/api/config/value_streams")
+async def list_value_streams(user: UserInfo = Depends(get_current_user)):
+    """Retrieve all value streams for the authenticated user."""
+    streams = list(get_all_value_streams(user.user_id))
+    return {"value_streams": [s.to_dict() for s in streams], "count": len(streams)}
+
+# LANGGRAPH ENDPOINTS — Analysis pipeline
+# ══════════════════════════════════════════════════════════════════════
+
+
+class InitiateRequest(BaseModel):
+    """Request body for starting an analysis."""
+    input_text: str  # The Opportunity Canvas text
+
+
+class InitiateResponse(BaseModel):
+    """Response with core assumptions for human review."""
+    core_assumptions: str
+    validation_status: str
+    user_id: str
+    message: str
+
+
+class ApproveRequest(BaseModel):
+    """Request body for approving assumptions and running full pipeline."""
+    input_text: str          # Original Opportunity Canvas text
+    core_assumptions: str    # The 5 assumptions (can be edited by user)
+    approved: bool = True    # Human approval flag
+
+
+class ApproveResponse(BaseModel):
+    """Response with the final compiled presentation."""
+    final_output: str
+    qa_pass: bool
+    qa_feedback: str
+    attempts: int
+    message: str
+
+
+@app.post("/api/initiate", response_model=InitiateResponse)
+async def initiate_analysis(
+    req: InitiateRequest,
+    user: UserInfo = Depends(get_current_user),
+):
+    """
+    Step 1: Submit Opportunity Canvas text.
+    The Master Agent extracts 5 core assumptions for human review.
+    """
+    from app.orchestrator import run_master_extraction
+    import os
+
+    if not req.input_text.strip():
+        raise HTTPException(status_code=400, detail="input_text cannot be empty.")
+
+    # Use mock mode if MOCK_MODE=1 env var is set (for demo/testing)
+    if os.getenv("MOCK_MODE") == "1":
+        mock_assumptions = """1. Verizon has real-time API access to its OSS/BSS systems for network slice management
+2. Network slicing APIs from RAN vendors (Samsung, Nokia, Ericsson) are available and production-ready
+3. Enterprise customers will prioritize custom 5G slices for mission-critical workloads
+4. Current sales cycle bottleneck is primarily due to lack of self-service quoting tools
+5. The total addressable market (TAM) for 5G enterprise slices is at least $2B annually"""
+        return InitiateResponse(
+            core_assumptions=mock_assumptions,
+            validation_status="preliminary",
+            user_id=user.user_id,
+            message="Core assumptions extracted (MOCK MODE). Review and approve to proceed.",
+        )
+
+    try:
+        result = await run_master_extraction(
+            input_text=req.input_text,
+            user_id=user.user_id,
+        )
+
+        return InitiateResponse(
+            core_assumptions=result["core_assumptions"],
+            validation_status=result["validation_status"],
+            user_id=user.user_id,
+            message="Core assumptions extracted. Review and approve to proceed.",
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Master agent extraction failed: {str(e)}",
+        )
+
+
+@app.post("/api/approve", response_model=ApproveResponse)
+async def approve_and_generate(
+    req: ApproveRequest,
+    user: UserInfo = Depends(get_current_user),
+):
+    """
+    Step 2: Approve the assumptions and trigger the full pipeline.
+    Runs 5 sub-agents in parallel, merges output, runs QA validation,
+    and returns the final Markdown presentation.
+    """
+    from app.orchestrator import run_full_pipeline
+
+    if not req.approved:
+        return ApproveResponse(
+            final_output="",
+            qa_pass=False,
+            qa_feedback="User rejected the assumptions.",
+            attempts=0,
+            message="Analysis cancelled by user.",
+        )
+
+    if not req.input_text.strip() or not req.core_assumptions.strip():
+        raise HTTPException(
+            status_code=400,
+            detail="Both input_text and core_assumptions are required.",
+        )
+
+    import os
+    # Use mock mode if MOCK_MODE=1 env var is set (for demo/testing)
+    if os.getenv("MOCK_MODE") == "1":
+        mock_report = """# Verizon 5G Enterprise Slicing — Business Capability Analysis
+
+## Executive Summary
+
+Verizon can unlock a significant new B2B revenue stream by enabling rapid provisioning of custom 5G network slices. This capability requires orchestrating existing OSS/BSS investments with new network slicing controllers and sales enablement tools.
+
+## Key Capabilities Required
+
+### 1. Slice Configuration & Provisioning (NEW)
+- **Owner:** Network Operations
+- **Maturity:** Initial → Managed
+- **Effort:** Medium (16–45 dev days)
+- **Cost:** $200K–$500K (Capex + OpEx)
+- Automate slice creation based on customer SLA templates
+- Real-time APIs to RAN vendors (5G cores, edge compute)
+- Policy enforcement (bandwidth, latency, jitter limits)
+
+### 2. Enterprise Customer Lifecycle Management (ENHANCE)
+- **Owner:** Sales Operations + Customer Mgmt
+- **Current State:** Fragmented across Salesforce, legacy systems
+- **Maturity:** Managed → Defined
+- New stages: Assess → Quote → Provision → Monitor → Optimize
+- Self-service portal for SMB customers, managed service for enterprise
+
+### 3. Real-Time Billing & Slice Costing (NEW)
+- **Owner:** Finance + OSS/BSS
+- **Maturity:** Initial
+- **Effort:** Large (46–90 dev days)
+- Usage-based billing triggered by network slice events
+- Cost allocation per slice, per customer, per service tier
+
+### 4. Network Performance Analytics (NEW)
+- **Owner:** Network Analytics + Customer Success
+- **Dashboard:** Real-time slice health, SLA attainment, forecasted costs
+- Data pipeline: Kafka → Snowflake → BI tools (Tableau, Looker)
+
+## Journey Map: Sales → Operations → Billing
+
+### Awareness Stage
+- Marketing campaigns for 5G slice benefits to enterprise segments
+- Industry analyst engagement (Gartner, Forrester)
+
+### Request Stage
+- Sales rep uses online configurator to quote slice options (lead time: < 5 min)
+- Customer specifies: bandwidth (1–1000 Mbps), latency (5–100ms), coverage region
+
+### Provision Stage
+- Approve → Automated slice creation via OSS/BSS APIs (< 2 hours)
+- Network team monitors slice activation health
+
+### Optimize Stage
+- Customer success team reviews SLA attainment and upsell opportunities monthly
+
+## Technical Architecture
+
+**High-level Integration Points:**
+```
+Sales Portal (Salesforce)
+  ↓
+Slice Configuration Service (Spring Boot / Python)
+  ↓
+Ericsson RAN Slice APIs, Nokia Core, Samsung vRAN
+  ↓
+OSS Event Streaming (Kafka)
+  ↓
+Real-time Analytics (Spark / Flink → Snowflake)
+  ↓
+Billing Engine (Oracle, SAP) + Customer Portal
+```
+
+**Key Technology Decisions:**
+- Event-driven architecture for slice lifecycle (provisioning, monitoring, deprovisioning)
+- Separate billing microservice to avoid coupling with OSS/BSS legacy system
+- Multi-cloud deployment (5G core redundancy) with RAN vendor support agreements
+
+## Financial Impact
+
+| Metric | Assumption | Year 1 | Year 2 | Year 3 |
+|--------|-----------|--------|--------|--------|
+| New Customers | 50/quarter | 200 | 400 | 600 |
+| ARPU per Slice | $2,500/month | $6M | $12M | $18M |
+| CAC (Customer Acq. Cost) | $5K | -$1M | -$2M | -$3M |
+| Gross Margin | 65% | $3.9M | $7.8M | $11.7M |
+| OpEx Savings | 25% automation | $250K | $500K | $750K |
+| **Net Incremental Profit** | | **$3.15M** | **$8.3M** | **$12.45M** |
+
+## Implementation Roadmap
+
+**Phase 1 (Months 1–3): Foundation**
+- Proof of concept with one RAN vendor (e.g., Samsung for 5G core slicing)
+- Sales configurator UI for slice options
+- Cost: $500K (Capex), 2 squads (8–10 engineers)
+
+**Phase 2 (Months 4–9): Scale**
+- Multi-vendor support (Ericsson, Nokia)
+- Automated billing integration
+- Real-time analytics dashboard
+- Cost: $1.2M, 3 squads
+
+**Phase 3 (Months 10–12): Go-to-Market**
+- Full customer portal launch
+- 50+ enterprise customer pilot
+- Cost: $600K, 2 squads + sales enablement
+
+**Total Investment:** ~$2.3M over 12 months
+**Expected ROI:** 2:1 by month 18, 5:1 by year 2
+
+## Risks & Mitigation
+
+| Risk | Probability | Impact | Mitigation |
+|------|---|---|---|
+| RAN vendor API delays | Medium | High | Multi-vendor strategy, fallback to CLI provisioning |
+| Customer adoption slow | Medium | High | Co-sell model with network partner, free trial tier |
+| Billing complexity | High | Medium | Dedicated billing team, Eurostar/Aria platform trial |
+| Churn (if SLAs missed) | Low | High | SLA credits, 24/7 NOC, auto-remediation for slice issues |
+
+## Success Metrics (12-Month KPIs)
+
+- ✅ 200+ enterprise slice customers acquired
+- ✅ < 2-hour provisioning time (vs. current 6–8 weeks)
+- ✅ 95% SLA attainment (uptime + latency compliance)
+- ✅ $6M new recurring revenue
+- ✅ Sales cycle reduced to 3 weeks (vs. 8 weeks)
+
+---
+
+**Generated by:** Multi-Agent Business Capability Analyzer
+**Date:** 2026-04-10
+**Status:** ✅ QA PASS — All assumptions validated, architecture sound, ROI realistic"""
+
+        return ApproveResponse(
+            final_output=mock_report,
+            qa_pass=True,
+            qa_feedback="",
+            attempts=1,
+            message="Analysis complete (MOCK MODE).",
+        )
+
+    try:
+        result = await run_full_pipeline(
+            input_text=req.input_text,
+            user_id=user.user_id,
+            core_assumptions=req.core_assumptions,
+        )
+
+        return ApproveResponse(
+            final_output=result["final_output"],
+            qa_pass=result["qa_pass"],
+            qa_feedback=result.get("qa_feedback", ""),
+            attempts=result.get("attempts", 1),
+            message="Analysis complete." if result["qa_pass"] else "Analysis complete with QA warnings.",
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Pipeline execution failed: {str(e)}",
+        )
+
+
+# ══════════════════════════════════════════════════════════════════════
+# RUN
+# ══════════════════════════════════════════════════════════════════════
+
+if __name__ == "__main__":
+    import uvicorn
+
+    uvicorn.run(
+        "main:app",
+        host=os.getenv("APP_HOST", "0.0.0.0"),
+        port=int(os.getenv("APP_PORT", 8000)),
+        reload=bool(os.getenv("APP_DEBUG", True)),
+    )

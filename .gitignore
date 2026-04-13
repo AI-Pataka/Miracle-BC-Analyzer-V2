@@ -1,0 +1,26 @@
+# Dependencies (too large for git — coworkers run npm install / pip install)
+node_modules/
+backend/venv/
+frontend/node_modules/
+.venv/
+venv/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Build artifacts
+frontend/dist/
+
+# Misc
+business-analyzer-main/
+.claude/

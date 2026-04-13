@@ -1,0 +1,7 @@
+{
+  "dependencies": ["."],
+  "graphs": {
+    "bc_analyzer": "./app/orchestrator.py:build_graph"
+  },
+  "env": ".env"
+}

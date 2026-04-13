@@ -1,0 +1,14 @@
+{
+  "name": "business-analyzer-workspace",
+  "version": "1.0.0",
+  "description": "Unified repository for Business Analyzer",
+  "scripts": {
+    "start:frontend": "cd frontend && npm run dev",
+    "start:backend": "cd backend && \"C:/Program Files/Python313/python.exe\" -m uvicorn main:app --reload",
+    "dev": "concurrently \"npm run start:frontend\" \"npm run start:backend\"",
+    "install:all": "npm install && cd frontend && npm install && cd ../backend && pip install -r requirements.txt"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  }
+}
