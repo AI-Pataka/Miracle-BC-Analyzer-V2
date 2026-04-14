@@ -1,8 +1,9 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import {
-  Plus, GripVertical, ChevronRight, Trash2, X, Check,
-  AlertTriangle, Settings2, Route, Users, Zap, ChevronsRight,
-  Star, Flag, BookOpen,
+  Plus, GripVertical, Trash2, X, Check,
+  AlertTriangle, Settings2, Route, Star, BookOpen,
+  ShoppingCart, School, Package, CreditCard, Headphones,
+  Wallet, Sparkles,
 } from 'lucide-react';
 import { Layout } from '../components/Layout';
 import { cn } from '../lib/utils';
@@ -58,6 +59,30 @@ const VALUE_STREAMS = [
   'Revenue Growth', 'Cost Reduction', 'Customer Experience', 'Operational Efficiency',
   'Compliance & Risk', 'Digital Transformation',
 ];
+
+const PHASE_CIRCLE_GRADIENT: Record<Phase, string> = {
+  Learn:   'linear-gradient(135deg, #7c3aed, #a78bfa)',
+  Buy:     'linear-gradient(135deg, #006190, #007bb5)',
+  Get:     'linear-gradient(135deg, #059669, #34d399)',
+  Pay:     'linear-gradient(135deg, #d97706, #fbbf24)',
+  Support: 'linear-gradient(135deg, #e11d48, #fb7185)',
+};
+
+const PHASE_BORDER_LEFT: Record<Phase, string> = {
+  Learn:   'border-l-violet-500',
+  Buy:     'border-l-blue-500',
+  Get:     'border-l-emerald-500',
+  Pay:     'border-l-amber-500',
+  Support: 'border-l-rose-500',
+};
+
+const PHASE_ICON_BG: Record<Phase, string> = {
+  Learn:   'bg-violet-100 text-violet-600',
+  Buy:     'bg-blue-100 text-blue-600',
+  Get:     'bg-emerald-100 text-emerald-600',
+  Pay:     'bg-amber-100 text-amber-600',
+  Support: 'bg-rose-100 text-rose-600',
+};
 
 // ─── Seed Data ────────────────────────────────────────────────────────────────
 
@@ -361,41 +386,26 @@ function generateJourneyId(existing: Journey[]): string {
   return `J${String(max + 1).padStart(3, '0')}`;
 }
 
+function getPhaseIcon(phase: Phase): React.ReactNode {
+  switch (phase) {
+    case 'Learn':   return <School className="w-6 h-6" />;
+    case 'Buy':     return <ShoppingCart className="w-6 h-6" />;
+    case 'Get':     return <Package className="w-6 h-6" />;
+    case 'Pay':     return <CreditCard className="w-6 h-6" />;
+    case 'Support': return <Headphones className="w-6 h-6" />;
+  }
+}
+
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
 const PhaseBadge: React.FC<{ phase: Phase }> = ({ phase }) => {
   const s = PHASE_STYLES[phase];
   return (
-    <span className={cn('inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-semibold ring-1', s.bg, s.text, s.ring)}>
-      <span className={cn('w-1.5 h-1.5 rounded-full', s.dot)} />
+    <span className={cn('inline-flex items-center px-2 py-0.5 rounded-full text-[9px] font-semibold uppercase tracking-wider', s.bg, s.text)}>
       {phase}
     </span>
   );
 };
-
-const Toggle: React.FC<{ checked: boolean; onChange: (v: boolean) => void; onLabel: string; offLabel: string; onColor?: string }> = ({
-  checked, onChange, onLabel, offLabel, onColor = 'bg-accent-600',
-}) => (
-  <button
-    type="button"
-    onClick={() => onChange(!checked)}
-    className={cn(
-      'flex items-center gap-2 text-sm font-medium transition-colors select-none',
-      checked ? 'text-slate-800' : 'text-slate-500',
-    )}
-  >
-    <span className={cn(
-      'relative inline-flex w-10 h-5 rounded-full transition-colors',
-      checked ? onColor : 'bg-slate-200',
-    )}>
-      <span className={cn(
-        'absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform',
-        checked ? 'translate-x-5' : 'translate-x-0.5',
-      )} />
-    </span>
-    {checked ? onLabel : offLabel}
-  </button>
-);
 
 const MultiSelectDropdown: React.FC<{
   options: string[];
@@ -419,46 +429,40 @@ const MultiSelectDropdown: React.FC<{
   }, [open]);
 
   const filtered = options.filter(o => o.toLowerCase().includes(search.toLowerCase()));
-
   const toggle = (opt: string) => {
     onChange(selected.includes(opt) ? selected.filter(s => s !== opt) : [...selected, opt]);
   };
 
   return (
     <div ref={ref} className="relative">
-      <button
-        type="button"
-        onClick={() => { setOpen(o => !o); if (open) setSearch(''); }}
-        className="w-full flex items-center justify-between gap-2 px-3 py-2 bg-white border border-slate-200 rounded-lg text-sm text-slate-700 hover:border-slate-300 focus:outline-none focus:ring-2 focus:ring-accent-500 focus:border-transparent transition-colors"
-      >
-        <span className="truncate">
-          {selected.length === 0 ? 'Select capabilities…' : `${selected.length} selected`}
-        </span>
-        <ChevronRight className={cn('w-4 h-4 text-slate-400 transition-transform flex-shrink-0', open && 'rotate-90')} />
-      </button>
-
       {selected.length > 0 && (
-        <div className="flex flex-wrap gap-1 mt-1.5">
+        <div className="flex flex-wrap gap-1.5 mb-2">
           {selected.map(s => (
-            <span key={s} className="inline-flex items-center gap-1 px-2 py-0.5 bg-accent-50 text-accent-700 ring-1 ring-accent-200 rounded-full text-xs font-medium">
+            <span key={s} className="inline-flex items-center gap-1 px-3 py-1 bg-[#dbe2f9] text-[#3f4759] rounded-full text-[10px] font-bold">
               {s}
-              <button type="button" onClick={() => toggle(s)} className="hover:text-accent-900">
+              <button type="button" onClick={() => toggle(s)} className="hover:text-red-500 ml-0.5">
                 <X className="w-3 h-3" />
               </button>
             </span>
           ))}
         </div>
       )}
-
+      <button
+        type="button"
+        onClick={() => { setOpen(o => !o); if (open) setSearch(''); }}
+        className="px-3 py-1 border-2 border-dashed border-slate-300 rounded-full text-[10px] text-slate-400 hover:bg-slate-100 transition-colors"
+      >
+        + Add Capability
+      </button>
       {open && (
-        <div className="absolute z-50 mt-1 w-full bg-white border border-slate-200 rounded-xl shadow-xl">
+        <div className="absolute z-50 mt-1 w-72 bg-white border border-slate-200 rounded-xl shadow-xl">
           <div className="p-2 border-b border-slate-100">
             <input
               autoFocus
               value={search}
               onChange={e => setSearch(e.target.value)}
-              placeholder="Search…"
-              className="w-full px-3 py-1.5 text-sm bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-accent-500"
+              placeholder="Search capabilities…"
+              className="w-full px-3 py-1.5 text-sm bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#006190]"
             />
           </div>
           <div className="max-h-48 overflow-y-auto p-1">
@@ -469,7 +473,7 @@ const MultiSelectDropdown: React.FC<{
                 onClick={() => toggle(opt)}
                 className="w-full flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm hover:bg-slate-50 text-left transition-colors"
               >
-                <div className={cn('w-4 h-4 rounded border-2 flex items-center justify-center flex-shrink-0', selected.includes(opt) ? 'bg-accent-600 border-accent-600' : 'border-slate-300')}>
+                <div className={cn('w-4 h-4 rounded border-2 flex items-center justify-center flex-shrink-0', selected.includes(opt) ? 'bg-[#006190] border-[#006190]' : 'border-slate-300')}>
                   {selected.includes(opt) && <Check className="w-2.5 h-2.5 text-white" />}
                 </div>
                 <span className="text-slate-700">{opt}</span>
@@ -491,144 +495,159 @@ const StepConfigPanel: React.FC<{
   onClose: () => void;
   onDelete: () => void;
 }> = ({ step, onUpdate, onClose, onDelete }) => {
+  const [local, setLocal] = useState<JourneyStep>(step);
+  useEffect(() => { setLocal(step); }, [step.id]);
+
   const set = <K extends keyof JourneyStep>(key: K, value: JourneyStep[K]) =>
-    onUpdate({ ...step, [key]: value });
+    setLocal(prev => ({ ...prev, [key]: value }));
+
+  const handleSave = () => { onUpdate(local); onClose(); };
+  const stepDisplayId = `STE-${local.stepId}-${local.phase.slice(0, 3).toUpperCase()}`;
 
   return (
-    <div className="flex flex-col h-full">
-      {/* Header */}
-      <div className="flex items-center justify-between p-5 border-b border-slate-100 bg-slate-50 rounded-t-xl">
-        <div className="flex items-center gap-2">
-          <Settings2 className="w-4 h-4 text-accent-600" />
-          <span className="text-sm font-semibold text-slate-700">Step Configuration</span>
+    <div className="flex flex-col">
+      {/* Config Header */}
+      <div className="p-6 bg-white flex items-center justify-between border-b border-slate-100">
+        <div className="flex items-center gap-4">
+          <div className={cn('w-12 h-12 rounded-lg flex items-center justify-center flex-shrink-0', PHASE_ICON_BG[local.phase])}>
+            {getPhaseIcon(local.phase)}
+          </div>
+          <div>
+            <h2 className="text-2xl font-extrabold tracking-tight text-slate-800">Step Configuration</h2>
+            <p className="text-xs text-slate-500 mt-0.5">Configuring {local.stepName} (ID: {stepDisplayId})</p>
+          </div>
         </div>
         <div className="flex items-center gap-2">
           <button
             onClick={onDelete}
-            className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors"
+            className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors"
             title="Delete step"
           >
             <Trash2 className="w-4 h-4" />
           </button>
           <button
             onClick={onClose}
-            className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-200 rounded-lg transition-colors"
+            className="px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
           >
-            <X className="w-4 h-4" />
+            Cancel
+          </button>
+          <button
+            onClick={handleSave}
+            className="px-4 py-2 text-sm font-semibold text-white bg-gradient-to-r from-[#006190] to-[#007bb5] rounded-lg shadow-sm hover:shadow-blue-200 transition-all"
+          >
+            Save Changes
           </button>
         </div>
       </div>
 
-      {/* Body */}
-      <div className="flex-1 overflow-y-auto p-5 space-y-5">
-        {/* Step ID & Name */}
-        <div className="grid grid-cols-5 gap-3">
-          <div className="col-span-2">
-            <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5">Step ID</label>
+      {/* Config Fields — 2-column grid */}
+      <div className="p-8 grid grid-cols-2 gap-x-12 gap-y-8">
+        {/* Col 1 */}
+        <div className="space-y-6">
+          <div className="space-y-1.5">
+            <label className="block text-[10px] font-semibold uppercase tracking-wider text-slate-500">Step ID</label>
             <input
-              value={step.stepId}
-              onChange={e => set('stepId', e.target.value)}
-              className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg text-sm font-mono text-slate-700 focus:outline-none focus:ring-2 focus:ring-accent-500 focus:border-transparent"
-              placeholder="e.g. 180"
+              readOnly
+              type="text"
+              value={stepDisplayId}
+              className="w-full bg-slate-100/70 border-none rounded-lg p-3 text-sm font-mono text-slate-600 focus:outline-none cursor-default"
             />
           </div>
-          <div className="col-span-3">
-            <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5">Step Name</label>
+          <div className="space-y-1.5">
+            <label className="block text-[10px] font-semibold uppercase tracking-wider text-slate-500">Step Name</label>
             <input
-              value={step.stepName}
+              type="text"
+              value={local.stepName}
               onChange={e => set('stepName', e.target.value)}
-              className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-accent-500 focus:border-transparent"
-              placeholder="e.g. Device Selection"
+              className="w-full bg-white border-none border-b-2 border-[#006190] rounded-t-lg p-3 text-sm focus:outline-none"
             />
+          </div>
+          <div className="space-y-1.5">
+            <label className="block text-[10px] font-semibold uppercase tracking-wider text-slate-500">Phase</label>
+            <select
+              value={local.phase}
+              onChange={e => set('phase', e.target.value as Phase)}
+              className="w-full bg-white border-none border-b-2 border-slate-200 rounded-t-lg p-3 text-sm focus:outline-none focus:border-[#006190] transition-colors cursor-pointer"
+            >
+              {PHASES.map(p => <option key={p} value={p}>{p}</option>)}
+            </select>
+          </div>
+          <div className="space-y-1.5">
+            <label className="block text-[10px] font-semibold uppercase tracking-wider text-slate-500">Initiator</label>
+            <select
+              value={local.initiator}
+              onChange={e => set('initiator', e.target.value as Initiator)}
+              className="w-full bg-white border-none border-b-2 border-slate-200 rounded-t-lg p-3 text-sm focus:outline-none focus:border-[#006190] transition-colors cursor-pointer"
+            >
+              <option value="Customer">Customer-Led</option>
+              <option value="System">System-Automated</option>
+            </select>
           </div>
         </div>
 
-        {/* Phase */}
-        <div>
-          <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5">Phase</label>
-          <div className="flex flex-wrap gap-2">
-            {PHASES.map(p => (
+        {/* Col 2 */}
+        <div className="space-y-6">
+          {/* Foundational Toggle */}
+          <div className="flex items-center justify-between p-4 bg-white rounded-lg shadow-sm border border-slate-100">
+            <div>
+              <div className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Foundational Step</div>
+              <div className="text-xs text-slate-400 mt-0.5">Critical for journey completion</div>
+            </div>
+            <button
+              type="button"
+              onClick={() => set('isFoundational', !local.isFoundational)}
+              className={cn(
+                'w-10 h-5 rounded-full relative flex items-center px-1 transition-colors flex-shrink-0',
+                local.isFoundational ? 'bg-[#006190] justify-end' : 'bg-slate-200 justify-start',
+              )}
+            >
+              <span className="w-3.5 h-3.5 bg-white rounded-full shadow-sm" />
+            </button>
+          </div>
+
+          {/* Friction Flag */}
+          <div className={cn(
+            'p-4 rounded-lg border-l-4 transition-colors',
+            local.hasFriction ? 'bg-red-50/60 border-red-500' : 'bg-slate-50 border-slate-300',
+          )}>
+            <div className="flex items-center justify-between mb-2">
+              <div className={cn('text-[10px] font-bold uppercase tracking-wider', local.hasFriction ? 'text-red-600' : 'text-slate-500')}>
+                Friction Flag
+              </div>
               <button
-                key={p}
                 type="button"
-                onClick={() => set('phase', p)}
+                onClick={() => set('hasFriction', !local.hasFriction)}
                 className={cn(
-                  'px-3 py-1.5 rounded-lg text-xs font-semibold ring-1 transition-all',
-                  step.phase === p
-                    ? cn(PHASE_STYLES[p].bg, PHASE_STYLES[p].text, PHASE_STYLES[p].ring, 'scale-105 shadow-sm')
-                    : 'bg-white text-slate-500 ring-slate-200 hover:ring-slate-300',
+                  'w-10 h-5 rounded-full relative flex items-center px-1 transition-colors flex-shrink-0',
+                  local.hasFriction ? 'bg-red-500 justify-end' : 'bg-slate-200 justify-start',
                 )}
               >
-                {p}
+                <span className="w-3.5 h-3.5 bg-white rounded-full shadow-sm" />
               </button>
-            ))}
-          </div>
-        </div>
-
-        {/* Initiator */}
-        <div>
-          <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5">Initiator</label>
-          <Toggle
-            checked={step.initiator === 'Customer'}
-            onChange={v => set('initiator', v ? 'Customer' : 'System')}
-            onLabel="Customer Initiated"
-            offLabel="System Initiated"
-          />
-        </div>
-
-        {/* Foundational */}
-        <div className="flex items-center gap-3 p-3 bg-slate-50 rounded-lg border border-slate-100">
-          <input
-            type="checkbox"
-            id={`foundational-${step.id}`}
-            checked={step.isFoundational}
-            onChange={e => set('isFoundational', e.target.checked)}
-            className="w-4 h-4 rounded border-slate-300 text-accent-600 focus:ring-accent-500 cursor-pointer"
-          />
-          <label htmlFor={`foundational-${step.id}`} className="flex items-center gap-2 text-sm font-medium text-slate-700 cursor-pointer select-none">
-            <Star className="w-4 h-4 text-amber-500" />
-            Foundational Step
-          </label>
-          <span className="text-xs text-slate-400 ml-auto">Core to every transaction</span>
-        </div>
-
-        {/* Friction Flag */}
-        <div>
-          <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5">Friction Flag</label>
-          <div className={cn('p-3 rounded-lg border transition-colors', step.hasFriction ? 'bg-rose-50 border-rose-200' : 'bg-emerald-50 border-emerald-200')}>
-            <Toggle
-              checked={step.hasFriction}
-              onChange={v => set('hasFriction', v)}
-              onLabel="Friction Present"
-              offLabel="No Friction"
-              onColor="bg-rose-500"
-            />
-            {step.hasFriction && (
-              <div className="mt-3">
-                <label className="block text-xs font-semibold text-rose-600 uppercase tracking-wider mb-1.5">
-                  <AlertTriangle className="w-3 h-3 inline mr-1" />
-                  Friction Reason
-                </label>
+            </div>
+            {local.hasFriction && (
+              <div className="space-y-1.5 mt-3">
+                <label className="block text-[9px] font-semibold uppercase tracking-wider text-red-500/80">Friction Reason</label>
                 <textarea
-                  value={step.frictionReason}
+                  value={local.frictionReason}
                   onChange={e => set('frictionReason', e.target.value)}
-                  rows={3}
-                  placeholder="Describe the source of friction, customer impact, and any known root cause…"
-                  className="w-full px-3 py-2 bg-white border border-rose-200 rounded-lg text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-rose-400 focus:border-transparent resize-none placeholder-slate-400"
+                  rows={2}
+                  placeholder="Describe the friction, customer impact, and root cause…"
+                  className="w-full bg-white border-none rounded-lg p-2 text-xs focus:outline-none resize-none"
                 />
               </div>
             )}
           </div>
-        </div>
 
-        {/* Required Capabilities */}
-        <div>
-          <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5">Required Capabilities</label>
-          <MultiSelectDropdown
-            options={CAPABILITY_OPTIONS}
-            selected={step.requiredCapabilities}
-            onChange={v => set('requiredCapabilities', v)}
-          />
+          {/* Required Capabilities */}
+          <div className="space-y-1.5">
+            <label className="block text-[10px] font-semibold uppercase tracking-wider text-slate-500">Required Capabilities</label>
+            <MultiSelectDropdown
+              options={CAPABILITY_OPTIONS}
+              selected={local.requiredCapabilities}
+              onChange={v => set('requiredCapabilities', v)}
+            />
+          </div>
         </div>
       </div>
     </div>
@@ -639,6 +658,7 @@ const StepConfigPanel: React.FC<{
 
 const StepBlock: React.FC<{
   step: JourneyStep;
+  index: number;
   isSelected: boolean;
   isLast: boolean;
   onSelect: () => void;
@@ -647,20 +667,22 @@ const StepBlock: React.FC<{
   onDragOver: (e: React.DragEvent) => void;
   onDragLeave: () => void;
   onDrop: (e: React.DragEvent) => void;
-}> = ({ step, isSelected, isLast, onSelect, isDragOver, onDragStart, onDragOver, onDragLeave, onDrop }) => {
+}> = ({ step, index, isSelected, onSelect, isDragOver, onDragStart, onDragOver, onDragLeave, onDrop }) => {
   const ps = PHASE_STYLES[step.phase];
 
   return (
     <div
-      className={cn('flex items-stretch gap-0', isDragOver && 'opacity-50')}
+      className={cn('relative group cursor-pointer', isDragOver && 'opacity-50')}
       onDragOver={onDragOver}
       onDragLeave={onDragLeave}
       onDrop={onDrop}
     >
-      {/* Timeline spine */}
-      <div className="flex flex-col items-center w-8 flex-shrink-0">
-        <div className={cn('w-3 h-3 rounded-full border-2 border-white shadow-sm mt-4', ps.dot)} />
-        {!isLast && <div className="w-0.5 flex-1 bg-slate-200 mt-1" />}
+      {/* Numbered circle */}
+      <div
+        className="absolute -left-4 top-3 w-8 h-8 rounded-full ring-2 ring-[#f9f9ff] flex items-center justify-center text-white text-[10px] font-bold z-10 shadow-sm"
+        style={{ background: PHASE_CIRCLE_GRADIENT[step.phase] }}
+      >
+        {String(index + 1).padStart(2, '0')}
       </div>
 
       {/* Card */}
@@ -669,57 +691,50 @@ const StepBlock: React.FC<{
         onDragStart={onDragStart}
         onClick={onSelect}
         className={cn(
-          'flex-1 ml-3 mb-3 p-4 bg-white rounded-xl border-2 cursor-pointer transition-all group',
-          isSelected
-            ? 'border-accent-400 shadow-md shadow-accent-100'
-            : 'border-slate-100 hover:border-slate-200 hover:shadow-sm',
-          isDragOver && 'border-dashed border-accent-400',
+          'bg-white p-4 rounded-lg border-l-4 shadow-sm transition-all',
+          PHASE_BORDER_LEFT[step.phase],
+          isSelected ? 'ring-2 ring-[#006190]/25 shadow-md' : 'group-hover:-translate-y-0.5 group-hover:shadow-md',
+          step.hasFriction && !isSelected && 'ring-2 ring-red-100',
         )}
       >
-        <div className="flex items-start justify-between gap-3">
-          <div className="flex items-start gap-3 min-w-0">
-            {/* Drag handle */}
-            <GripVertical className="w-4 h-4 text-slate-300 group-hover:text-slate-400 mt-0.5 flex-shrink-0 cursor-grab" />
-            <div className="min-w-0">
-              <div className="flex items-center gap-2 flex-wrap">
-                <span className="font-mono text-xs font-bold text-slate-400">{step.stepId}</span>
-                <span className="text-sm font-semibold text-slate-800">{step.stepName}</span>
-              </div>
-              <div className="flex items-center gap-2 mt-1.5 flex-wrap">
-                <PhaseBadge phase={step.phase} />
-                <span className={cn(
-                  'inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ring-1',
-                  step.initiator === 'Customer'
-                    ? 'bg-sky-50 text-sky-700 ring-sky-200'
-                    : 'bg-slate-100 text-slate-600 ring-slate-200',
-                )}>
-                  {step.initiator === 'Customer' ? <Users className="w-3 h-3" /> : <Zap className="w-3 h-3" />}
-                  {step.initiator}
-                </span>
-                {step.isFoundational && (
-                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-amber-50 text-amber-700 ring-1 ring-amber-200">
-                    <Star className="w-3 h-3" />
-                    Foundational
-                  </span>
-                )}
-              </div>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-2 flex-shrink-0">
+        <div className="flex items-center justify-between mb-2">
+          <PhaseBadge phase={step.phase} />
+          <div className="flex items-center gap-2">
             {step.hasFriction && (
-              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-bold bg-rose-100 text-rose-700 ring-1 ring-rose-200">
-                <Flag className="w-3 h-3" /> Friction
-              </span>
+              <div className="flex items-center gap-1 text-red-500">
+                <AlertTriangle className="w-3 h-3" />
+                <span className="text-[9px] font-bold">Friction Point</span>
+              </div>
             )}
-            {step.requiredCapabilities.length > 0 && (
-              <span className="text-xs text-slate-400 bg-slate-50 px-2 py-0.5 rounded-full ring-1 ring-slate-100">
-                {step.requiredCapabilities.length} cap.
-              </span>
-            )}
-            <ChevronRight className={cn('w-4 h-4 text-slate-300 transition-transform', isSelected && 'rotate-90 text-accent-500')} />
+            <GripVertical className="w-4 h-4 text-slate-300 cursor-grab opacity-0 group-hover:opacity-100 transition-opacity" />
           </div>
         </div>
+
+        <h4 className="font-bold text-sm text-slate-800">{step.stepName}</h4>
+
+        {step.hasFriction && step.frictionReason && (
+          <p className="text-[10px] text-slate-400 mt-1 line-clamp-1">{step.frictionReason}</p>
+        )}
+
+        {step.requiredCapabilities.length > 0 && (
+          <div className="mt-2 flex items-center gap-1">
+            {step.requiredCapabilities.slice(0, 4).map((_, i) => (
+              <span key={i} className={cn('w-1.5 h-1.5 rounded-full', ps.dot)} />
+            ))}
+            {step.requiredCapabilities.length > 4 && (
+              <span className="text-[8px] text-slate-400 ml-1">+{step.requiredCapabilities.length - 4}</span>
+            )}
+          </div>
+        )}
+
+        {step.isFoundational && (
+          <div className="mt-1.5">
+            <span className="inline-flex items-center gap-1 text-[9px] text-amber-600 font-semibold">
+              <Star className="w-2.5 h-2.5" />
+              Foundational
+            </span>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -830,34 +845,33 @@ export const JourneyDashboard: React.FC = () => {
 
   const frictionCount = activeJourney.steps.filter(s => s.hasFriction).length;
 
+  const topFrictionPhase = PHASES.reduce<Phase | null>((top, p) => {
+    const count = activeJourney.steps.filter(s => s.phase === p && s.hasFriction).length;
+    if (count === 0) return top;
+    if (!top) return p;
+    return count > activeJourney.steps.filter(s => s.phase === top && s.hasFriction).length ? p : top;
+  }, null);
+
   return (
     <Layout noPadding>
-      <div className="flex flex-col md:flex-row h-screen overflow-hidden">
+      <div className="flex h-screen overflow-hidden bg-[#f9f9ff]">
 
         {/* ── Journey Sidebar ──────────────────────────────────────────────── */}
-        <aside className="w-full md:w-56 bg-white border-b md:border-b-0 md:border-r border-slate-100 flex flex-col flex-shrink-0 md:h-full overflow-hidden">
+        <aside className="w-56 bg-white border-r border-slate-100 flex flex-col flex-shrink-0 overflow-hidden">
           <div className="p-4 border-b border-slate-100">
             <div className="flex items-center gap-2 mb-3">
-              <Route className="w-4 h-4 text-accent-600" />
-              <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Journeys</span>
+              <Route className="w-4 h-4 text-[#4648d4]" />
+              <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Journeys</span>
             </div>
-            <button
-              onClick={addJourney}
-              className="w-full flex items-center justify-center gap-2 px-3 py-2 bg-accent-600 hover:bg-accent-700 text-white text-sm font-semibold rounded-lg transition-colors shadow-sm"
-            >
-              <Plus className="w-4 h-4" />
-              Add New Journey
-            </button>
           </div>
-
-          <nav className="flex md:flex-col flex-1 p-2 gap-0.5 overflow-x-auto md:overflow-x-hidden md:overflow-y-auto">
+          <nav className="flex-1 flex flex-col p-2 gap-0.5 overflow-y-auto">
             {journeys.map(j => (
               <div
                 key={j.id}
                 className={cn(
-                  'group flex-shrink-0 md:flex-shrink relative rounded-lg transition-colors',
+                  'group relative rounded-lg transition-colors',
                   j.id === activeJourneyId
-                    ? 'bg-accent-50 border border-accent-200'
+                    ? 'bg-[#e9edff] border border-[#4648d4]/20'
                     : 'border border-transparent hover:bg-slate-50',
                 )}
               >
@@ -865,11 +879,11 @@ export const JourneyDashboard: React.FC = () => {
                   onClick={() => { setActiveJourneyId(j.id); setSelectedStepId(null); }}
                   className="w-full text-left px-3 py-2.5 pr-8 text-sm font-medium"
                 >
-                  <div className={cn('flex items-center justify-between gap-2', j.id === activeJourneyId ? 'text-accent-700' : 'text-slate-600')}>
-                    <span className="truncate">{j.name}</span>
-                    <span className="text-xs text-slate-400 flex-shrink-0">{j.steps.length}</span>
+                  <div className={cn('flex items-center justify-between gap-2', j.id === activeJourneyId ? 'text-[#4648d4]' : 'text-slate-600')}>
+                    <span className="truncate text-xs font-semibold">{j.name}</span>
+                    <span className="text-[10px] text-slate-400 flex-shrink-0">{j.steps.length}</span>
                   </div>
-                  <div className="mt-1 text-xs text-slate-400 truncate">{j.primaryValueStream}</div>
+                  <div className="mt-0.5 text-[9px] text-slate-400 truncate">{j.primaryValueStream}</div>
                 </button>
                 {journeys.length > 1 && (
                   <button
@@ -883,113 +897,149 @@ export const JourneyDashboard: React.FC = () => {
               </div>
             ))}
           </nav>
-
-          <div className="hidden md:block p-4 border-t border-slate-100 text-xs text-slate-400 text-center">
+          <div className="p-4 border-t border-slate-100 text-[10px] text-slate-400 text-center">
             {journeys.length} journeys defined
           </div>
         </aside>
 
-        {/* ── Main Area ────────────────────────────────────────────────────── */}
-        <div className="flex-1 flex flex-col min-w-0 h-full overflow-hidden">
+        {/* ── Main Canvas ──────────────────────────────────────────────────── */}
+        <div className="flex-1 flex flex-col overflow-hidden">
+          <div className="flex-1 overflow-y-auto p-8 space-y-8">
 
-          {/* Journey Metadata Header */}
-          <div className="bg-white border-b border-slate-100 p-4 md:p-6">
-            <div className="flex flex-wrap items-start justify-between gap-4 md:gap-6 mb-5">
+            {/* Page Header */}
+            <div className="flex items-end justify-between">
               <div className="flex-1 min-w-0">
-                <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1">Journey Name</label>
+                <div className="text-[10px] font-semibold uppercase tracking-[0.1em] text-[#4648d4] mb-1">Journeys</div>
                 <input
                   value={activeJourney.name}
                   onChange={e => updateJourney({ name: e.target.value })}
-                  className="text-2xl font-display font-bold text-slate-900 bg-transparent border-b-2 border-transparent hover:border-slate-200 focus:border-accent-400 focus:outline-none w-full pb-0.5 transition-colors"
+                  className="text-4xl font-extrabold text-slate-900 bg-transparent border-b-2 border-transparent hover:border-slate-200 focus:border-[#4648d4] focus:outline-none w-full tracking-tight pb-0.5 transition-colors"
                 />
               </div>
-              <div className="flex items-center gap-2 flex-shrink-0 pt-5">
-                <span className="text-xs font-mono text-slate-400 bg-slate-100 px-2 py-1 rounded">{activeJourney.id}</span>
-                <span className={cn('text-xs font-semibold px-2 py-1 rounded-full ring-1', frictionCount > 0 ? 'bg-rose-50 text-rose-600 ring-rose-200' : 'bg-emerald-50 text-emerald-600 ring-emerald-200')}>
-                  {frictionCount > 0 ? `${frictionCount} friction point${frictionCount > 1 ? 's' : ''}` : 'No friction'}
-                </span>
-              </div>
+              <button
+                onClick={addJourney}
+                className="ml-6 flex-shrink-0 bg-gradient-to-br from-[#006190] to-[#007bb5] text-white px-6 py-3 rounded-lg shadow-lg hover:shadow-blue-200/40 transition-all flex items-center gap-2 font-semibold text-sm"
+              >
+                <Plus className="w-4 h-4" />
+                Add New Journey
+              </button>
             </div>
 
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">Total Base Volume</label>
-                <input
-                  value={activeJourney.totalBaseVolume}
-                  onChange={e => updateJourney({ totalBaseVolume: e.target.value })}
-                  placeholder="e.g. 125,000"
-                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-accent-500 focus:border-transparent"
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">Primary Value Stream</label>
-                <select
-                  value={activeJourney.primaryValueStream}
-                  onChange={e => updateJourney({ primaryValueStream: e.target.value })}
-                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-accent-500 focus:border-transparent"
-                >
-                  {VALUE_STREAMS.map(vs => <option key={vs}>{vs}</option>)}
-                </select>
-              </div>
-            </div>
-
-            {/* Phase summary strip */}
-            <div className="flex flex-wrap items-center gap-2 md:gap-3 mt-4">
-              {PHASES.map(p => (
-                <div key={p} className={cn('flex items-center gap-1.5 px-2.5 md:px-3 py-1.5 rounded-lg text-xs font-semibold ring-1', PHASE_STYLES[p].bg, PHASE_STYLES[p].text, PHASE_STYLES[p].ring)}>
-                  <span className={cn('w-2 h-2 rounded-full', PHASE_STYLES[p].dot)} />
-                  {p} <span className="font-bold">{phaseCounts[p]}</span>
-                </div>
-              ))}
-              <div className="flex items-center gap-1.5 text-xs text-slate-500">
-                <BookOpen className="w-3.5 h-3.5" />
-                <span>{activeJourney.steps.length} steps total</span>
-              </div>
-            </div>
-          </div>
-
-          {/* Content split: Steps + Config Panel */}
-          <div className="flex flex-col md:flex-row flex-1 min-h-0">
-
-            {/* ── Step Timeline ──────────────────────────────────────────── */}
-            <div className={cn('flex flex-col transition-all min-w-0', selectedStep ? 'md:w-[55%]' : 'flex-1')}>
-              <div className="flex items-center justify-between px-6 py-3 border-b border-slate-100 bg-slate-50">
-                <div className="flex items-center gap-2">
-                  <ChevronsRight className="w-4 h-4 text-accent-600" />
-                  <span className="text-sm font-semibold text-slate-700">Journey Step Sequence</span>
-                  <span className="text-xs text-slate-400">— drag to reorder</span>
-                </div>
-                <button
-                  onClick={addStep}
-                  className="flex items-center gap-1.5 px-3 py-1.5 bg-accent-600 hover:bg-accent-700 text-white text-xs font-semibold rounded-lg transition-colors shadow-sm"
-                >
-                  <Plus className="w-3.5 h-3.5" />
-                  Add Step
-                </button>
-              </div>
-
-              <div className="flex-1 overflow-y-auto p-6">
-                {activeJourney.steps.length === 0 ? (
-                  <div className="flex flex-col items-center justify-center h-64 text-center">
-                    <div className="w-16 h-16 bg-slate-100 rounded-2xl flex items-center justify-center mb-4">
-                      <Route className="w-8 h-8 text-slate-300" />
+            {/* Bento Grid: Metadata & Intelligence Pulse */}
+            <div className="grid grid-cols-12 gap-6">
+              {/* Journey Metadata Card */}
+              <div className="col-span-8 bg-white p-6 rounded-lg relative overflow-hidden shadow-sm border border-slate-100/80">
+                <div className="absolute left-0 top-0 bottom-0 w-1 bg-[#4648d4] rounded-l-lg" />
+                <div className="grid grid-cols-3 gap-8">
+                  <div>
+                    <div className="text-[10px] font-semibold uppercase tracking-wider text-slate-500 mb-2">Journey Name</div>
+                    <div className="text-base font-bold text-slate-800 truncate">{activeJourney.name}</div>
+                  </div>
+                  <div>
+                    <div className="text-[10px] font-semibold uppercase tracking-wider text-slate-500 mb-2">Total Base Volume</div>
+                    <input
+                      value={activeJourney.totalBaseVolume}
+                      onChange={e => updateJourney({ totalBaseVolume: e.target.value })}
+                      placeholder="e.g. 125,000"
+                      className="text-base font-bold text-slate-800 bg-transparent border-none focus:outline-none focus:border-b-2 focus:border-[#006190] w-full pb-0.5 transition-colors placeholder-slate-300"
+                    />
+                  </div>
+                  <div>
+                    <div className="text-[10px] font-semibold uppercase tracking-wider text-slate-500 mb-2">Primary Value Stream</div>
+                    <div className="flex items-center gap-2">
+                      <Wallet className="w-4 h-4 text-[#4648d4] flex-shrink-0" />
+                      <select
+                        value={activeJourney.primaryValueStream}
+                        onChange={e => updateJourney({ primaryValueStream: e.target.value })}
+                        className="text-sm font-bold text-slate-800 bg-transparent border-none focus:outline-none cursor-pointer flex-1 min-w-0"
+                      >
+                        {VALUE_STREAMS.map(vs => <option key={vs}>{vs}</option>)}
+                      </select>
                     </div>
-                    <p className="text-slate-500 font-medium mb-1">No steps yet</p>
-                    <p className="text-sm text-slate-400 mb-4">Add the first step to begin building this journey</p>
+                  </div>
+                </div>
+                {/* Phase summary strip */}
+                <div className="flex flex-wrap items-center gap-2 mt-5 pt-4 border-t border-slate-100">
+                  {PHASES.map(p => (
+                    <div key={p} className={cn('flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold ring-1', PHASE_STYLES[p].bg, PHASE_STYLES[p].text, PHASE_STYLES[p].ring)}>
+                      <span className={cn('w-2 h-2 rounded-full', PHASE_STYLES[p].dot)} />
+                      {p} <span className="font-bold">{phaseCounts[p]}</span>
+                    </div>
+                  ))}
+                  <div className="flex items-center gap-1.5 text-xs text-slate-400 ml-1">
+                    <BookOpen className="w-3.5 h-3.5" />
+                    <span>{activeJourney.steps.length} steps total</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Intelligence Pulse */}
+              <div className="col-span-4 bg-[#293041] p-6 rounded-lg text-white flex flex-col justify-between">
+                <div className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">Intelligence Pulse</div>
+                <div className="flex items-end gap-3 mt-3">
+                  <div className="text-3xl font-extrabold text-[#8ecdff]">
+                    {activeJourney.steps.length > 0
+                      ? `${Math.round((frictionCount / activeJourney.steps.length) * 100)}%`
+                      : '—'}
+                  </div>
+                  <div className="text-xs text-slate-300 pb-1 leading-snug">
+                    {frictionCount > 0
+                      ? `${frictionCount} friction point${frictionCount > 1 ? 's' : ''} detected${topFrictionPhase ? ` in ${topFrictionPhase} phase` : ''}.`
+                      : 'No friction points detected in this journey.'}
+                  </div>
+                </div>
+                <div className="mt-4">
+                  <span className={cn(
+                    'text-xs font-semibold px-2.5 py-1 rounded-full',
+                    frictionCount > 0 ? 'bg-rose-500/20 text-rose-300' : 'bg-emerald-500/20 text-emerald-300',
+                  )}>
+                    {frictionCount > 0 ? `${frictionCount} friction point${frictionCount > 1 ? 's' : ''}` : 'All clear'}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* Phase Navigation & Workflow Layout */}
+            <div className="grid grid-cols-12 gap-8 items-start">
+
+              {/* Left: Step Sequence (Vertical Timeline) */}
+              <div className="col-span-4 space-y-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h3 className="text-xl font-bold tracking-tight text-slate-800">Journey Step Sequence</h3>
+                    <p className="text-xs text-slate-500 mt-0.5">— drag to reorder</p>
+                  </div>
+                  <button
+                    onClick={addStep}
+                    className="flex items-center gap-1.5 px-3 py-1.5 bg-[#006190] hover:bg-[#004b71] text-white text-xs font-semibold rounded-lg transition-colors shadow-sm"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    Add Step
+                  </button>
+                </div>
+
+                {activeJourney.steps.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center h-48 text-center bg-white rounded-lg border border-dashed border-slate-200">
+                    <Route className="w-8 h-8 text-slate-300 mb-2" />
+                    <p className="text-slate-500 font-medium text-sm mb-1">No steps yet</p>
+                    <p className="text-xs text-slate-400 mb-3">Add the first step to build this journey</p>
                     <button
                       onClick={addStep}
-                      className="flex items-center gap-2 px-4 py-2 bg-accent-600 hover:bg-accent-700 text-white text-sm font-semibold rounded-lg transition-colors"
+                      className="flex items-center gap-1.5 px-3 py-1.5 bg-[#006190] text-white text-xs font-semibold rounded-lg"
                     >
-                      <Plus className="w-4 h-4" />
+                      <Plus className="w-3 h-3" />
                       Add First Step
                     </button>
                   </div>
                 ) : (
-                  <div>
+                  <div className="relative pl-8 space-y-3">
+                    {/* Vertical connecting line */}
+                    <div className="absolute left-4 top-4 bottom-4 w-0.5 bg-slate-200/60" />
                     {activeJourney.steps.map((step, idx) => (
                       <StepBlock
                         key={step.id}
                         step={step}
+                        index={idx}
                         isSelected={selectedStepId === step.id}
                         isLast={idx === activeJourney.steps.length - 1}
                         onSelect={() => setSelectedStepId(selectedStepId === step.id ? null : step.id)}
@@ -1003,21 +1053,36 @@ export const JourneyDashboard: React.FC = () => {
                   </div>
                 )}
               </div>
-            </div>
 
-            {/* ── Step Config Panel ──────────────────────────────────────── */}
-            {selectedStep && (
-              <div className="w-full md:w-[45%] border-t md:border-t-0 md:border-l border-slate-100 bg-white flex flex-col overflow-hidden">
-                <StepConfigPanel
-                  step={selectedStep}
-                  onUpdate={updateStep}
-                  onClose={() => setSelectedStepId(null)}
-                  onDelete={() => deleteStep(selectedStep.id)}
-                />
+              {/* Right: Step Configuration Panel */}
+              <div className="col-span-8">
+                {selectedStep ? (
+                  <div className="bg-[#f1f3ff] rounded-lg overflow-hidden shadow-sm">
+                    <StepConfigPanel
+                      step={selectedStep}
+                      onUpdate={updateStep}
+                      onClose={() => setSelectedStepId(null)}
+                      onDelete={() => deleteStep(selectedStep.id)}
+                    />
+                  </div>
+                ) : (
+                  <div className="bg-white rounded-lg border border-dashed border-slate-200 flex flex-col items-center justify-center h-[400px] text-center">
+                    <Settings2 className="w-10 h-10 text-slate-300 mb-3" />
+                    <p className="text-slate-500 font-medium mb-1">No step selected</p>
+                    <p className="text-sm text-slate-400">Select a step from the sequence to configure it</p>
+                  </div>
+                )}
               </div>
-            )}
+
+            </div>
           </div>
         </div>
+
+        {/* Floating Action Button */}
+        <button className="fixed bottom-8 right-8 w-14 h-14 rounded-full bg-[#4648d4] text-white shadow-2xl flex items-center justify-center hover:scale-110 active:scale-95 transition-all duration-150 z-50">
+          <Sparkles className="w-6 h-6" />
+        </button>
+
       </div>
     </Layout>
   );

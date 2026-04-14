@@ -1,7 +1,7 @@
 import React, { useState, useRef, useMemo, useCallback, useEffect } from 'react';
 import {
-  Search, Upload, Plus, ChevronRight, ChevronDown,
-  Trash2, X, Check, AlertCircle, Layers, Download,
+  Search, Plus, ChevronRight, ChevronDown,
+  Trash2, X, Check, AlertCircle,
   Bot, Cpu, HelpCircle, CloudUpload, Loader2,
 } from 'lucide-react';
 import { Layout } from '../components/Layout';
@@ -18,8 +18,16 @@ const AVAILABILITY_LEVELS: AvailabilityLevel[] = ['', 'Industry', 'Available', '
 const AVAILABILITY_STYLES: Record<string, string> = {
   Industry:   'bg-slate-100 text-slate-600 ring-1 ring-slate-300',
   Available:  'bg-sky-50 text-sky-700 ring-1 ring-sky-200',
-  Mature:     'bg-violet-50 text-violet-700 ring-1 ring-violet-200',
+  Mature:     'bg-indigo-50 text-indigo-700 ring-1 ring-indigo-200',
   Optimized:  'bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200',
+};
+
+const AVAILABILITY_PCT: Record<string, number> = {
+  '': 0,
+  Industry:   30,
+  Available:  55,
+  Mature:     78,
+  Optimized:  100,
 };
 
 interface CapabilityRecord {
@@ -42,7 +50,7 @@ interface CapabilityRecord {
 const AI_CATEGORIES: AiCategory[] = ['AI Capability', 'Non AI Capability', 'TBD'];
 
 const AI_CATEGORY_STYLES: Record<AiCategory, string> = {
-  'AI Capability':     'bg-violet-50 text-violet-700 ring-1 ring-violet-200',
+  'AI Capability':     'bg-indigo-50 text-indigo-700 ring-1 ring-indigo-200',
   'Non AI Capability': 'bg-slate-100 text-slate-600 ring-1 ring-slate-200',
   'TBD':               'bg-amber-50 text-amber-700 ring-1 ring-amber-200',
 };
@@ -220,7 +228,7 @@ const SystemsEditor: React.FC<SystemsEditorProps> = ({ systems, onChange, onDone
       <div className="relative">
         <input
           autoFocus
-          className="w-full text-xs border border-slate-200 rounded-lg px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-violet-400"
+          className="w-full text-xs border border-slate-200 rounded-lg px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-indigo-400"
           placeholder="Type system + Enter…"
           value={input}
           onChange={e => { setInput(e.target.value); setShowSuggestions(true); }}
@@ -238,7 +246,7 @@ const SystemsEditor: React.FC<SystemsEditorProps> = ({ systems, onChange, onDone
                 key={s}
                 type="button"
                 onMouseDown={() => addSystem(s)}
-                className="w-full text-left px-3 py-1.5 text-xs hover:bg-violet-50 hover:text-violet-700 transition-colors"
+                className="w-full text-left px-3 py-1.5 text-xs hover:bg-indigo-50 hover:text-indigo-700 transition-colors"
               >
                 {s}
               </button>
@@ -249,7 +257,7 @@ const SystemsEditor: React.FC<SystemsEditorProps> = ({ systems, onChange, onDone
       <button
         type="button"
         onClick={onDone}
-        className="mt-1.5 text-xs px-3 py-1 bg-violet-600 text-white rounded-lg hover:bg-violet-700 transition-colors"
+        className="mt-1.5 text-xs px-3 py-1 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors"
       >
         Done
       </button>
@@ -311,7 +319,7 @@ const CsvPreviewModal: React.FC<CsvPreviewProps> = ({ preview, onImport, onCance
           <button onClick={onCancel} className="px-4 py-2 text-sm font-medium text-slate-600 border border-slate-200 rounded-xl hover:bg-white transition-colors">
             Cancel
           </button>
-          <button onClick={() => onImport(preview.parsed)} className="px-4 py-2 text-sm font-semibold bg-violet-600 text-white rounded-xl hover:bg-violet-700 transition-colors flex items-center gap-2">
+          <button onClick={() => onImport(preview.parsed)} className="px-4 py-2 text-sm font-semibold bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 transition-colors flex items-center gap-2">
             <Check className="w-4 h-4" />
             Import {preview.parsed.length} {preview.parsed.length === 1 ? 'row' : 'rows'}
           </button>
@@ -338,7 +346,7 @@ const NewCapabilityRow: React.FC<NewRowProps> = ({ initial, onSave, onCancel }) 
   const [error, setError] = useState('');
 
   const inputCls =
-    'w-full text-xs border border-slate-200 rounded-lg px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-violet-400 bg-white placeholder:text-slate-300';
+    'w-full text-xs border border-slate-200 rounded-lg px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-indigo-400 bg-white placeholder:text-slate-300';
 
   const handleSave = () => {
     if (!form.l1?.trim()) { setError('L1 is required'); return; }
@@ -356,7 +364,7 @@ const NewCapabilityRow: React.FC<NewRowProps> = ({ initial, onSave, onCancel }) 
   };
 
   return (
-    <tr className="bg-violet-50/60 border-b border-violet-100">
+    <tr className="bg-indigo-50/60 border-b border-indigo-100">
       <td className="px-3 py-2 align-top">
         <input className={inputCls} placeholder="L1 *" value={form.l1} onChange={e => setForm(f => ({ ...f, l1: e.target.value }))} />
       </td>
@@ -412,7 +420,7 @@ const NewCapabilityRow: React.FC<NewRowProps> = ({ initial, onSave, onCancel }) 
             </p>
           )}
           <div className="flex items-center gap-1">
-            <button type="button" onClick={handleSave} className="p-1.5 rounded-lg bg-violet-600 text-white hover:bg-violet-700 transition-colors" title="Save">
+            <button type="button" onClick={handleSave} className="p-1.5 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 transition-colors" title="Save">
               <Check className="w-4 h-4" />
             </button>
             <button type="button" onClick={onCancel} className="p-1.5 rounded-lg bg-slate-200 text-slate-600 hover:bg-slate-300 transition-colors" title="Cancel">
@@ -433,7 +441,7 @@ export const CapabilityDashboard: React.FC = () => {
   const [search, setSearch]               = useState('');
   const [collapsedL1s, setCollapsedL1s]   = useState<Set<string>>(new Set());
   const [editingCell, setEditingCell]     = useState<{ id: string; field: keyof CapabilityRecord } | null>(null);
-  const [expandedDesc, setExpandedDesc]   = useState<Set<string>>(() => new Set(SEED_DATA.map(r => r.id)));
+  const [expandedDesc, setExpandedDesc]   = useState<Set<string>>(new Set());
   const [addingNew, setAddingNew]         = useState<{ forL1?: string } | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
   const [csvError, setCsvError]           = useState<string | null>(null);
@@ -468,7 +476,6 @@ export const CapabilityDashboard: React.FC = () => {
               availability: c.availability || c.maturity_level || '',
             }));
             setRecords(mapped);
-            setExpandedDesc(new Set(mapped.map((r: CapabilityRecord) => r.id)));
           }
         }
       } catch {
@@ -699,13 +706,13 @@ export const CapabilityDashboard: React.FC = () => {
     if (field === 'aiCategory') {
       if (isEditing) {
         return (
-          <select autoFocus aria-label="AI Category" className="text-xs border border-violet-300 rounded-lg px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-violet-400 bg-white" value={record.aiCategory} onChange={e => updateField(record.id, 'aiCategory', e.target.value as AiCategory)} onBlur={() => setEditingCell(null)}>
+          <select autoFocus aria-label="AI Category" className="text-xs border border-indigo-300 rounded-lg px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-indigo-400 bg-white" value={record.aiCategory} onChange={e => updateField(record.id, 'aiCategory', e.target.value as AiCategory)} onBlur={() => setEditingCell(null)}>
             {AI_CATEGORIES.map(c => <option key={c}>{c}</option>)}
           </select>
         );
       }
       return (
-        <button type="button" className="text-left hover:ring-2 hover:ring-violet-300 rounded-full transition-all" onClick={() => setEditingCell({ id: record.id, field: 'aiCategory' })} title="Click to change">
+        <button type="button" className="text-left hover:ring-2 hover:ring-indigo-300 rounded-full transition-all" onClick={() => setEditingCell({ id: record.id, field: 'aiCategory' })} title="Click to change">
           <AiCategoryBadge category={record.aiCategory} />
         </button>
       );
@@ -714,26 +721,38 @@ export const CapabilityDashboard: React.FC = () => {
     if (field === 'availability') {
       if (isEditing) {
         return (
-          <select autoFocus aria-label="Availability" className="text-xs border border-violet-300 rounded-lg px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-violet-400 bg-white" value={record.availability} onChange={e => updateField(record.id, 'availability', e.target.value)} onBlur={() => setEditingCell(null)}>
+          <select autoFocus aria-label="Availability" className="text-xs border border-indigo-300 rounded-lg px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-indigo-400 bg-white" value={record.availability} onChange={e => updateField(record.id, 'availability', e.target.value)} onBlur={() => setEditingCell(null)}>
             {AVAILABILITY_LEVELS.map(m => <option key={m} value={m}>{m || '—'}</option>)}
           </select>
         );
       }
       const m = record.availability;
+      const pct = AVAILABILITY_PCT[m] ?? 0;
       if (!m) return <span className="text-slate-300 text-xs italic cursor-pointer" onClick={() => setEditingCell({ id: record.id, field: 'availability' })}>—</span>;
       return (
-        <button type="button" className="hover:ring-2 hover:ring-violet-300 rounded-full transition-all" onClick={() => setEditingCell({ id: record.id, field: 'availability' })}>
-          <span className={cn('inline-flex px-2.5 py-1 rounded-full text-xs font-medium whitespace-nowrap', AVAILABILITY_STYLES[m] || 'bg-slate-100 text-slate-600')}>{m}</span>
+        <button type="button" className="w-full text-left hover:ring-2 hover:ring-indigo-200 rounded-md transition-all p-1" onClick={() => setEditingCell({ id: record.id, field: 'availability' })}>
+          <div className="w-full bg-slate-100 h-1.5 rounded-full overflow-hidden mb-1.5">
+            <div
+              className={cn(
+                'h-full rounded-full transition-all',
+                pct >= 78 ? 'bg-emerald-500' : pct >= 55 ? 'bg-blue-500' : pct >= 30 ? 'bg-amber-500' : 'bg-slate-300',
+              )}
+              style={{ width: `${pct}%` }}
+            />
+          </div>
+          <span className={cn('inline-flex px-2 py-0.5 rounded-full text-[10px] font-medium whitespace-nowrap', AVAILABILITY_STYLES[m] || 'bg-slate-100 text-slate-600')}>{m}</span>
         </button>
       );
     }
 
     if (field === 'hasIt') {
       return (
-        <button type="button" onClick={() => updateField(record.id, 'hasIt', !record.hasIt)} className="flex items-center justify-center w-full">
+        <button type="button" onClick={() => updateField(record.id, 'hasIt', !record.hasIt)} className="flex items-center justify-center w-full" title={record.hasIt ? 'Has it — click to toggle' : 'Does not have it — click to toggle'}>
           {record.hasIt
-            ? <span className="inline-flex items-center px-2 py-0.5 bg-emerald-50 text-emerald-700 text-xs font-medium rounded-full ring-1 ring-emerald-200">Yes</span>
-            : <span className="text-slate-300 text-xs">—</span>}
+            ? <div className="w-5 h-5 rounded-full bg-emerald-500 flex items-center justify-center">
+                <Check className="w-3 h-3 text-white" />
+              </div>
+            : <div className="w-5 h-5 rounded-full border-2 border-slate-300 hover:border-slate-400 transition-colors" />}
         </button>
       );
     }
@@ -748,7 +767,7 @@ export const CapabilityDashboard: React.FC = () => {
         <div className="cursor-pointer flex flex-wrap gap-1 min-h-[26px] p-1 rounded-lg hover:bg-slate-50 transition-colors" onClick={() => setEditingCell({ id: record.id, field: 'systems' })} title="Click to edit">
           {record.systems.length > 0
             ? record.systems.map(s => (
-                <span key={s} className="inline-flex items-center px-2 py-0.5 bg-sky-50 text-sky-700 text-xs rounded-md ring-1 ring-sky-200">{s}</span>
+                <span key={s} className="inline-flex items-center px-2 py-0.5 bg-slate-100 text-slate-600 text-xs rounded border border-slate-200">{s}</span>
               ))
             : <span className="text-slate-300 text-xs italic">+ Add systems</span>}
         </div>
@@ -759,7 +778,7 @@ export const CapabilityDashboard: React.FC = () => {
       const isExpanded = expandedDesc.has(record.id);
       if (isEditing) {
         return (
-          <textarea autoFocus aria-label="Description" placeholder="Enter description" className="w-full text-xs border border-violet-300 rounded-lg px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-violet-400 bg-white resize-none" rows={4} defaultValue={record.description} onBlur={e => commitText(record.id, 'description', e.target.value)} onKeyDown={e => { if (e.key === 'Escape') setEditingCell(null); }} />
+          <textarea autoFocus aria-label="Description" placeholder="Enter description" className="w-full text-xs border border-indigo-300 rounded-lg px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-indigo-400 bg-white resize-none" rows={4} defaultValue={record.description} onBlur={e => commitText(record.id, 'description', e.target.value)} onKeyDown={e => { if (e.key === 'Escape') setEditingCell(null); }} />
         );
       }
       return (
@@ -768,7 +787,7 @@ export const CapabilityDashboard: React.FC = () => {
             {record.description || <span className="text-slate-300 italic">No description — click to add</span>}
           </p>
           {record.description && record.description.length > 90 && (
-            <button type="button" className="text-xs text-violet-600 hover:text-violet-700 mt-0.5 font-medium" onClick={e => {
+            <button type="button" className="text-xs text-indigo-600 hover:text-indigo-700 mt-0.5 font-medium" onClick={e => {
               e.stopPropagation();
               setExpandedDesc(prev => { const next = new Set(prev); next.has(record.id) ? next.delete(record.id) : next.add(record.id); return next; });
             }}>
@@ -783,12 +802,12 @@ export const CapabilityDashboard: React.FC = () => {
     const textValue = record[field] as string;
     if (isEditing) {
       return (
-        <input autoFocus aria-label={String(field)} placeholder={String(field)} className="w-full text-sm border border-violet-300 rounded-lg px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-violet-400 bg-white" defaultValue={textValue} onBlur={e => commitText(record.id, field, e.target.value)} onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); if (e.key === 'Escape') setEditingCell(null); }} />
+        <input autoFocus aria-label={String(field)} placeholder={String(field)} className="w-full text-xs border border-indigo-300 rounded-lg px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-indigo-400 bg-white" defaultValue={textValue} onBlur={e => commitText(record.id, field, e.target.value)} onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); if (e.key === 'Escape') setEditingCell(null); }} />
       );
     }
     return (
-      <div className="cursor-pointer min-h-[24px] px-1 py-0.5 rounded hover:bg-slate-50 transition-colors text-sm text-slate-700" onClick={() => setEditingCell({ id: record.id, field })} title="Click to edit">
-        {textValue || <span className="text-slate-300 italic text-xs">—</span>}
+      <div className="cursor-pointer min-h-[24px] px-1 py-0.5 rounded hover:bg-slate-50 transition-colors text-xs text-slate-700" onClick={() => setEditingCell({ id: record.id, field })} title="Click to edit">
+        {textValue || <span className="text-slate-300 italic">—</span>}
       </div>
     );
   };
@@ -799,69 +818,114 @@ export const CapabilityDashboard: React.FC = () => {
 
   return (
     <Layout>
-      <div className="max-w-[1800px] mx-auto">
+      <div className="p-6 max-w-[1800px] mx-auto">
 
-        {/* ── Header ─────────────────────────────────────────────────────── */}
-        <header className="mb-6">
-          <div className="flex items-start justify-between gap-4 flex-wrap">
-            <div className="flex items-start gap-3">
-              <div className="p-2 bg-violet-600 rounded-xl mt-0.5 flex-shrink-0">
-                <Layers className="w-5 h-5 text-white" />
-              </div>
-              <div>
-                <h1 className="text-2xl font-display font-bold text-slate-900 leading-tight">
-                  Capability Registry &amp; Systems Mapping
-                </h1>
-                <p className="text-slate-500 text-sm mt-0.5">
-                  Define, organise and govern enterprise capabilities across all business domains.
-                </p>
-              </div>
-            </div>
+        {/* ── Page Header ──────────────────────────────────────────────────── */}
+        <div className="flex flex-col md:flex-row md:items-end justify-between gap-6 mb-8">
+          <div className="space-y-1">
+            <span className="text-xs font-bold text-indigo-600 uppercase tracking-[0.05em]">Governance &amp; Mapping</span>
+            <h1 className="text-3xl font-extrabold text-slate-900 tracking-tight">
+              Capability Registry &amp; Systems Mapping
+            </h1>
+            <p className="text-slate-500 font-medium">
+              Define, organise and govern enterprise capabilities across all business domains.
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-3 flex-shrink-0">
+            <button
+              onClick={handleExportCSV}
+              className="px-4 py-2 text-sm font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 transition-colors rounded-lg"
+            >
+              Export CSV
+            </button>
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              className="px-4 py-2 text-sm font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 transition-colors rounded-lg"
+            >
+              Bulk Upload CSV
+            </button>
+            <input ref={fileInputRef} type="file" accept=".csv" aria-label="Upload CSV file" className="hidden" onChange={handleFileChange} />
+            <button
+              onClick={handleSaveToCloud}
+              disabled={saving}
+              className="px-5 py-2 text-sm font-bold text-white bg-emerald-600 hover:bg-emerald-700 transition-all rounded-lg flex items-center gap-2 disabled:opacity-60"
+            >
+              {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <CloudUpload className="w-4 h-4" />}
+              {saving ? 'Saving...' : 'Save to Cloud'}
+            </button>
+            <button
+              onClick={() => { setAddingNew({}); setEditingCell(null); }}
+              className="px-5 py-2 text-sm font-bold text-white bg-indigo-600 hover:bg-indigo-700 transition-all rounded-lg flex items-center gap-2"
+            >
+              <Plus className="w-4 h-4" />
+              Add New Capability
+            </button>
+          </div>
+        </div>
 
-            <div className="flex items-center gap-2 flex-wrap flex-shrink-0">
-              <button onClick={handleSaveToCloud} disabled={saving} className="flex items-center gap-2 px-4 py-2 rounded-xl border border-emerald-200 bg-emerald-50 text-emerald-700 text-sm font-medium hover:bg-emerald-100 transition-colors shadow-sm disabled:opacity-60">
-                {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <CloudUpload className="w-4 h-4" />}
-                {saving ? 'Saving...' : 'Save to Cloud'}
-              </button>
-              <button onClick={handleExportCSV} className="flex items-center gap-2 px-4 py-2 rounded-xl border border-slate-200 bg-white text-slate-600 text-sm font-medium hover:bg-slate-50 transition-colors shadow-sm">
-                <Download className="w-4 h-4" /> Export CSV
-              </button>
-              <button onClick={() => fileInputRef.current?.click()} className="flex items-center gap-2 px-4 py-2 rounded-xl border border-slate-200 bg-white text-slate-600 text-sm font-medium hover:bg-slate-50 transition-colors shadow-sm">
-                <Upload className="w-4 h-4" /> Bulk Upload CSV
-              </button>
-              <input ref={fileInputRef} type="file" accept=".csv" aria-label="Upload CSV file" className="hidden" onChange={handleFileChange} />
-              <button onClick={() => { setAddingNew({}); setEditingCell(null); }} className="flex items-center gap-2 px-4 py-2 rounded-xl bg-violet-600 text-white text-sm font-semibold hover:bg-violet-700 transition-colors shadow-sm shadow-violet-200">
-                <Plus className="w-4 h-4" /> Add New Capability
-              </button>
+        {/* ── Notifications ────────────────────────────────────────────────── */}
+        {csvError && (
+          <div className="mb-6 flex items-center gap-3 p-3 bg-rose-50 border border-rose-200 rounded-xl text-rose-700 text-sm">
+            <AlertCircle className="w-4 h-4 flex-shrink-0" />
+            <span className="flex-1">{csvError}</span>
+            <button type="button" onClick={() => setCsvError(null)} aria-label="Dismiss error"><X className="w-4 h-4" /></button>
+          </div>
+        )}
+        {csvSuccess && (
+          <div className="mb-6 flex items-center gap-3 p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-emerald-700 text-sm">
+            <Check className="w-4 h-4 flex-shrink-0" />
+            <span className="flex-1">{csvSuccess}</span>
+            <button type="button" onClick={() => setCsvSuccess(null)} aria-label="Dismiss"><X className="w-4 h-4" /></button>
+          </div>
+        )}
+
+        {/* ── KPI Bento Grid ───────────────────────────────────────────────── */}
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
+          <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100 relative overflow-hidden">
+            <div className="absolute top-0 left-0 w-1 h-full bg-blue-600 rounded-l-xl" />
+            <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Total Capabilities</p>
+            <div className="flex items-baseline gap-2">
+              <span className="text-3xl font-extrabold text-slate-900">{kpis.total}</span>
             </div>
           </div>
-
-          {csvError && (
-            <div className="mt-4 flex items-center gap-3 p-3 bg-rose-50 border border-rose-200 rounded-xl text-rose-700 text-sm">
-              <AlertCircle className="w-4 h-4 flex-shrink-0" />
-              <span className="flex-1">{csvError}</span>
-              <button type="button" onClick={() => setCsvError(null)} aria-label="Dismiss error"><X className="w-4 h-4" /></button>
+          <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100 relative overflow-hidden">
+            <div className="absolute top-0 left-0 w-1 h-full bg-indigo-600 rounded-l-xl" />
+            <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Business Domains</p>
+            <div className="flex items-baseline gap-2">
+              <span className="text-3xl font-extrabold text-slate-900">{kpis.l1Count}</span>
+              <span className="text-xs text-slate-400 font-medium">Active L1</span>
             </div>
-          )}
-          {csvSuccess && (
-            <div className="mt-4 flex items-center gap-3 p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-emerald-700 text-sm">
-              <Check className="w-4 h-4 flex-shrink-0" />
-              <span className="flex-1">{csvSuccess}</span>
-              <button type="button" onClick={() => setCsvSuccess(null)} aria-label="Dismiss"><X className="w-4 h-4" /></button>
+          </div>
+          <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100 relative overflow-hidden">
+            <div className="absolute top-0 left-0 w-1 h-full bg-slate-500 rounded-l-xl" />
+            <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">AI Enabled</p>
+            <div className="flex items-baseline gap-2">
+              <span className="text-3xl font-extrabold text-slate-900">{kpis.aiCount}</span>
+              <span className="text-xs font-bold text-blue-600">
+                {kpis.total > 0 ? Math.round((kpis.aiCount / kpis.total) * 100) : 0}% Coverage
+              </span>
             </div>
-          )}
-        </header>
+          </div>
+          <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100 relative overflow-hidden">
+            <div className="absolute top-0 left-0 w-1 h-full bg-red-500 rounded-l-xl" />
+            <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Pending TBD</p>
+            <div className="flex items-baseline gap-2">
+              <span className="text-3xl font-extrabold text-slate-900">{kpis.tbdCount}</span>
+              <span className="text-xs font-bold text-red-500">Requires Audit</span>
+            </div>
+          </div>
+        </div>
 
-        {/* ── Compact KPI + Search Toolbar ────────────────────────────────── */}
+        {/* ── Search + Toolbar ─────────────────────────────────────────────── */}
         <div className="flex items-center gap-3 mb-4 flex-wrap">
           <div className="relative flex-1 min-w-[240px] max-w-lg">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
             <input
               type="text"
-              placeholder="Search by capability, system, company, or owner…"
+              placeholder="Search capabilities, systems or owners…"
               value={search}
               onChange={e => setSearch(e.target.value)}
-              className="w-full pl-9 pr-9 py-2 text-sm border border-slate-200 rounded-xl bg-white focus:outline-none focus:ring-2 focus:ring-violet-400 shadow-sm"
+              className="w-full pl-9 pr-9 py-2 text-sm border border-slate-200 rounded-xl bg-white focus:outline-none focus:ring-2 focus:ring-indigo-400 shadow-sm"
             />
             {search && (
               <button type="button" onClick={() => setSearch('')} aria-label="Clear search" className="absolute right-3 top-1/2 -translate-y-1/2">
@@ -869,23 +933,6 @@ export const CapabilityDashboard: React.FC = () => {
               </button>
             )}
           </div>
-
-          {/* Compact KPI badges */}
-          <div className="flex items-center gap-2 flex-wrap">
-            <span className="inline-flex items-center gap-1.5 px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-medium text-slate-600 shadow-sm">
-              Total: <strong className="text-violet-700">{kpis.total}</strong>
-            </span>
-            <span className="inline-flex items-center gap-1.5 px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-medium text-slate-600 shadow-sm">
-              Domains: <strong className="text-sky-700">{kpis.l1Count}</strong>
-            </span>
-            <span className="inline-flex items-center gap-1.5 px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-medium text-slate-600 shadow-sm">
-              AI: <strong className="text-emerald-700">{kpis.aiCount}</strong>
-            </span>
-            <span className="inline-flex items-center gap-1.5 px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-medium text-slate-600 shadow-sm">
-              TBD: <strong className="text-amber-600">{kpis.tbdCount}</strong>
-            </span>
-          </div>
-
           <div className="flex items-center gap-1.5 ml-auto">
             <button type="button" onClick={expandAll} className="text-xs px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-slate-500 hover:bg-slate-50 flex items-center gap-1 transition-colors">
               <ChevronDown className="w-3 h-3" /> Expand all
@@ -896,8 +943,8 @@ export const CapabilityDashboard: React.FC = () => {
           </div>
         </div>
 
-        {/* ── Data Grid (Card Layout) ──────────────────────────────────── */}
-        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm">
+        {/* ── Data Table ───────────────────────────────────────────────────── */}
+        <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
           {loading ? (
             <div className="flex items-center justify-center py-20 gap-3 text-slate-400">
               <Loader2 className="w-5 h-5 animate-spin" />
@@ -905,172 +952,138 @@ export const CapabilityDashboard: React.FC = () => {
             </div>
           ) : (
             <>
-              <div className="overflow-y-auto max-h-[calc(100vh-340px)]">
-                {addingNew !== null && addingNew.forL1 === undefined && (
-                  <div className="p-4 border-b border-slate-100">
-                    <table className="w-full"><tbody><NewCapabilityRow initial={{}} onSave={addRecord} onCancel={() => setAddingNew(null)} /></tbody></table>
-                  </div>
-                )}
+              <div className="overflow-x-auto">
+                <div className="overflow-y-auto max-h-[calc(100vh-420px)]">
+                  <table className="w-full text-left border-collapse min-w-[1200px]">
+                    <thead>
+                      <tr className="sticky top-0 z-20 bg-slate-50 border-b-2 border-slate-200">
+                        <th className="px-4 py-3.5 text-[11px] font-extrabold text-slate-500 uppercase tracking-widest whitespace-nowrap">L1</th>
+                        <th className="px-4 py-3.5 text-[11px] font-extrabold text-slate-500 uppercase tracking-widest whitespace-nowrap">L2</th>
+                        <th className="px-4 py-3.5 text-[11px] font-extrabold text-slate-500 uppercase tracking-widest whitespace-nowrap">L3</th>
+                        <th className="px-4 py-3.5 text-[11px] font-extrabold text-slate-500 uppercase tracking-widest whitespace-nowrap">L4</th>
+                        <th className="px-4 py-3.5 text-[11px] font-extrabold text-slate-500 uppercase tracking-widest min-w-[200px]">Description</th>
+                        <th className="px-4 py-3.5 text-[11px] font-extrabold text-slate-500 uppercase tracking-widest whitespace-nowrap">AI Category</th>
+                        <th className="px-4 py-3.5 text-[11px] font-extrabold text-slate-500 uppercase tracking-widest whitespace-nowrap min-w-[180px]">System / Tech Mapping</th>
+                        <th className="px-4 py-3.5 text-[11px] font-extrabold text-slate-500 uppercase tracking-widest whitespace-nowrap">Owner</th>
+                        <th className="px-4 py-3.5 text-[11px] font-extrabold text-slate-500 uppercase tracking-widest whitespace-nowrap">Company</th>
+                        <th className="px-4 py-3.5 text-[11px] font-extrabold text-slate-500 uppercase tracking-widest whitespace-nowrap text-center">Has It</th>
+                        <th className="px-4 py-3.5 text-[11px] font-extrabold text-slate-500 uppercase tracking-widest whitespace-nowrap min-w-[130px]">Availability</th>
+                        <th className="px-4 py-3.5 w-10" />
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
 
-                {filteredRecords.length === 0 && addingNew === null && (
-                  <div className="py-20 text-center">
-                    <div className="flex flex-col items-center gap-3 text-slate-400">
-                      <Search className="w-10 h-10 text-slate-200" />
-                      <p className="font-semibold text-slate-500 text-base">No capabilities found</p>
-                      <p className="text-sm">Try a different search term or add a new capability.</p>
-                    </div>
-                  </div>
-                )}
+                      {/* Top-level new capability row */}
+                      {addingNew !== null && addingNew.forL1 === undefined && (
+                        <NewCapabilityRow initial={{}} onSave={addRecord} onCancel={() => setAddingNew(null)} />
+                      )}
 
-                {Array.from(groupedRecords.entries()).map(([l1, rows]) => (
-                  <div key={l1}>
-                    {/* L1 group header */}
-                    <div className="bg-gradient-to-r from-violet-50 to-slate-50/60 border-t border-violet-100 px-4 py-2.5 sticky top-0 z-10">
-                      <div className="flex flex-wrap items-center gap-3">
-                        <button type="button" onClick={() => toggleL1(l1)} className="flex items-center gap-2 hover:text-violet-700 transition-colors text-left">
-                          {collapsedL1s.has(l1)
-                            ? <ChevronRight className="w-4 h-4 text-violet-500 flex-shrink-0" />
-                            : <ChevronDown  className="w-4 h-4 text-violet-500 flex-shrink-0" />}
-                          <span className="text-sm font-bold text-slate-800">{l1}</span>
-                        </button>
-                        <span className="inline-flex items-center px-2 py-0.5 bg-violet-100 text-violet-700 text-xs font-semibold rounded-full">
-                          {rows.length} {rows.length === 1 ? 'capability' : 'capabilities'}
-                        </span>
-                        <div className="ml-auto">
-                          <button
-                            type="button"
-                            onClick={() => startAddingForL1(l1)}
-                            className="flex items-center gap-1 text-xs text-violet-600 hover:text-violet-800 font-medium px-2 py-1 rounded-lg hover:bg-violet-100 transition-colors"
-                          >
-                            <Plus className="w-3.5 h-3.5" /> Add row
-                          </button>
-                        </div>
-                      </div>
-                    </div>
+                      {/* Empty state */}
+                      {filteredRecords.length === 0 && addingNew === null && (
+                        <tr>
+                          <td colSpan={COL_SPAN}>
+                            <div className="py-20 text-center">
+                              <div className="flex flex-col items-center gap-3 text-slate-400">
+                                <Search className="w-10 h-10 text-slate-200" />
+                                <p className="font-semibold text-slate-500 text-base">No capabilities found</p>
+                                <p className="text-sm">Try a different search term or add a new capability.</p>
+                              </div>
+                            </div>
+                          </td>
+                        </tr>
+                      )}
 
-                    {/* Capability cards */}
-                    {!collapsedL1s.has(l1) && rows.map(record => {
-                      const isExpanded = expandedDesc.has(record.id);
-                      return (
-                        <div key={record.id} className="border-b border-slate-100 hover:bg-slate-50/60 transition-colors group">
-                          {/* Card header — always visible */}
-                          <div
-                            className="px-4 py-3 cursor-pointer"
-                            onClick={() => setExpandedDesc(prev => { const n = new Set(prev); n.has(record.id) ? n.delete(record.id) : n.add(record.id); return n; })}
-                          >
-                            <div className="flex items-start justify-between gap-3">
-                              <div className="min-w-0 flex-1">
-                                <div className="flex flex-wrap items-center gap-2 mb-1">
-                                  <span className="text-sm font-semibold text-slate-900">{record.l3 || record.l2 || record.l1}</span>
-                                  {renderCell(record, 'aiCategory')}
-                                  {record.availability && renderCell(record, 'availability')}
-                                  {renderCell(record, 'hasIt')}
-                                </div>
-                                <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500">
-                                  {record.l2 && record.l3 && <span>L2: {record.l2}</span>}
-                                  {record.l4 && <span>L4: {record.l4}</span>}
-                                  {record.owner && <span>Owner: <span className="text-slate-700">{record.owner}</span></span>}
-                                  {record.company && <span>Company: <span className="text-slate-700">{record.company}</span></span>}
+                      {/* Grouped rows */}
+                      {Array.from(groupedRecords.entries()).map(([l1, rows]) => (
+                        <React.Fragment key={l1}>
+
+                          {/* L1 group header row */}
+                          <tr className="bg-slate-50/80 border-t-2 border-t-slate-200">
+                            <td colSpan={COL_SPAN} className="px-6 py-3">
+                              <div className="flex items-center gap-3">
+                                <button
+                                  type="button"
+                                  onClick={() => toggleL1(l1)}
+                                  className="flex items-center gap-2 hover:text-blue-700 transition-colors"
+                                >
+                                  {collapsedL1s.has(l1)
+                                    ? <ChevronRight className="w-4 h-4 text-blue-600 flex-shrink-0" />
+                                    : <ChevronDown  className="w-4 h-4 text-blue-600 flex-shrink-0" />}
+                                  <span className="font-bold text-sm text-blue-700 uppercase tracking-widest">{l1}</span>
+                                </button>
+                                <span className="px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 text-[10px] font-bold">
+                                  {rows.length} {rows.length === 1 ? 'Capability' : 'Capabilities'}
+                                </span>
+                                <div className="ml-auto">
+                                  <button
+                                    type="button"
+                                    onClick={() => startAddingForL1(l1)}
+                                    className="flex items-center gap-1 text-xs text-indigo-600 hover:text-indigo-800 font-medium px-2 py-1 rounded-lg hover:bg-indigo-50 transition-colors"
+                                  >
+                                    <Plus className="w-3.5 h-3.5" /> Add row
+                                  </button>
                                 </div>
                               </div>
-                              <div className="flex items-center gap-2 flex-shrink-0">
+                            </td>
+                          </tr>
+
+                          {/* Capability rows */}
+                          {!collapsedL1s.has(l1) && rows.map(record => (
+                            <tr key={record.id} className="hover:bg-slate-50/60 transition-colors group">
+                              <td className="px-4 py-3 align-top">{renderCell(record, 'l1')}</td>
+                              <td className="px-4 py-3 align-top">{renderCell(record, 'l2')}</td>
+                              <td className="px-4 py-3 align-top">{renderCell(record, 'l3')}</td>
+                              <td className="px-4 py-3 align-top">{renderCell(record, 'l4')}</td>
+                              <td className="px-4 py-3 align-top max-w-xs">{renderCell(record, 'description')}</td>
+                              <td className="px-4 py-3 align-top whitespace-nowrap">{renderCell(record, 'aiCategory')}</td>
+                              <td className="px-4 py-3 align-top">{renderCell(record, 'systems')}</td>
+                              <td className="px-4 py-3 align-top">{renderCell(record, 'owner')}</td>
+                              <td className="px-4 py-3 align-top">{renderCell(record, 'company')}</td>
+                              <td className="px-4 py-3 align-top text-center">{renderCell(record, 'hasIt')}</td>
+                              <td className="px-4 py-3 align-top">{renderCell(record, 'availability')}</td>
+                              <td className="px-4 py-3 align-top">
                                 {deleteConfirm === record.id ? (
-                                  <div className="flex items-center gap-1" onClick={e => e.stopPropagation()}>
-                                    <button type="button" onClick={() => deleteRecord(record.id)} className="px-2 py-1 text-xs bg-rose-600 text-white rounded-lg hover:bg-rose-700 transition-colors">Confirm</button>
+                                  <div className="flex items-center gap-1">
+                                    <button type="button" onClick={() => deleteRecord(record.id)} className="px-2 py-1 text-xs bg-rose-600 text-white rounded-lg hover:bg-rose-700 transition-colors whitespace-nowrap">Confirm</button>
                                     <button type="button" onClick={() => setDeleteConfirm(null)} className="px-2 py-1 text-xs bg-slate-200 text-slate-600 rounded-lg hover:bg-slate-300 transition-colors">Cancel</button>
                                   </div>
                                 ) : (
-                                  <button type="button" onClick={e => { e.stopPropagation(); setDeleteConfirm(record.id); }} className="p-1.5 rounded-lg text-slate-400 hover:text-rose-500 hover:bg-rose-50 transition-colors opacity-0 group-hover:opacity-100" title="Delete">
+                                  <button
+                                    type="button"
+                                    onClick={e => { e.stopPropagation(); setDeleteConfirm(record.id); }}
+                                    className="p-1.5 rounded-lg text-slate-400 hover:text-rose-500 hover:bg-rose-50 transition-colors opacity-0 group-hover:opacity-100"
+                                    title="Delete"
+                                  >
                                     <Trash2 className="w-3.5 h-3.5" />
                                   </button>
                                 )}
-                                {isExpanded
-                                  ? <ChevronDown className="w-4 h-4 text-slate-400" />
-                                  : <ChevronRight className="w-4 h-4 text-slate-400" />}
-                              </div>
-                            </div>
-                          </div>
+                              </td>
+                            </tr>
+                          ))}
 
-                          {/* Card body — expanded details */}
-                          {isExpanded && (
-                            <div className="px-4 pb-4 space-y-3" onClick={e => e.stopPropagation()}>
-                              {/* Description */}
-                              <div>
-                                <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Description</span>
-                                <div className="mt-1">{renderCell(record, 'description')}</div>
-                              </div>
-
-                              {/* Fields grid */}
-                              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                                <div>
-                                  <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">L1 Capability</span>
-                                  <div className="mt-1">{renderCell(record, 'l1')}</div>
-                                </div>
-                                <div>
-                                  <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">L2 Capability</span>
-                                  <div className="mt-1">{renderCell(record, 'l2')}</div>
-                                </div>
-                                <div>
-                                  <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">L3 Capability</span>
-                                  <div className="mt-1">{renderCell(record, 'l3')}</div>
-                                </div>
-                                <div>
-                                  <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">L4 Capability</span>
-                                  <div className="mt-1">{renderCell(record, 'l4')}</div>
-                                </div>
-                                <div>
-                                  <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">AI Category</span>
-                                  <div className="mt-1">{renderCell(record, 'aiCategory')}</div>
-                                </div>
-                                <div>
-                                  <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Availability</span>
-                                  <div className="mt-1">{renderCell(record, 'availability')}</div>
-                                </div>
-                                <div>
-                                  <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Owner</span>
-                                  <div className="mt-1">{renderCell(record, 'owner')}</div>
-                                </div>
-                                <div>
-                                  <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Company</span>
-                                  <div className="mt-1">{renderCell(record, 'company')}</div>
-                                </div>
-                                <div>
-                                  <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Has It</span>
-                                  <div className="mt-1">{renderCell(record, 'hasIt')}</div>
-                                </div>
-                              </div>
-
-                              {/* Systems */}
-                              <div>
-                                <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">System / Tech Mapping</span>
-                                <div className="mt-1">{renderCell(record, 'systems')}</div>
-                              </div>
-                            </div>
+                          {/* Per-group new row */}
+                          {!collapsedL1s.has(l1) && addingNew?.forL1 === l1 && (
+                            <NewCapabilityRow initial={{ l1 }} onSave={addRecord} onCancel={() => setAddingNew(null)} />
                           )}
-                        </div>
-                      );
-                    })}
 
-                    {/* Per-group new row */}
-                    {!collapsedL1s.has(l1) && addingNew?.forL1 === l1 && (
-                      <div className="p-4 border-b border-slate-100">
-                        <table className="w-full"><tbody><NewCapabilityRow initial={{ l1 }} onSave={addRecord} onCancel={() => setAddingNew(null)} /></tbody></table>
-                      </div>
-                    )}
-                  </div>
-                ))}
+                        </React.Fragment>
+                      ))}
+
+                    </tbody>
+                  </table>
+                </div>
               </div>
 
               {/* Footer */}
-              <div className="px-4 py-3 border-t border-slate-100 bg-slate-50 rounded-b-2xl flex items-center justify-between text-xs text-slate-400">
+              <div className="px-6 py-4 border-t border-slate-100 bg-slate-50 rounded-b-xl flex items-center justify-between text-xs text-slate-400">
                 <span>
                   {records.length} total
-                  {search && ' · ' + filteredRecords.length + ' shown for "' + search + '"'}
+                  {search && ` · ${filteredRecords.length} shown for "${search}"`}
                 </span>
                 <button
                   type="button"
                   onClick={() => { setAddingNew({}); setEditingCell(null); }}
-                  className="flex items-center gap-1.5 text-violet-600 hover:text-violet-700 font-semibold transition-colors"
+                  className="flex items-center gap-1.5 text-indigo-600 hover:text-indigo-700 font-semibold transition-colors"
                 >
                   <Plus className="w-3.5 h-3.5" /> Add Capability
                 </button>
@@ -1079,7 +1092,7 @@ export const CapabilityDashboard: React.FC = () => {
           )}
         </div>
 
-        {/* CSV format hint */}
+        {/* ── CSV format hint ───────────────────────────────────────────────── */}
         <div className="mt-4 p-4 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-500 leading-relaxed">
           <span className="font-semibold text-slate-600">CSV Format: </span>
           Required:{' '}
@@ -1087,6 +1100,7 @@ export const CapabilityDashboard: React.FC = () => {
           {'  ·  '}Optional:{' '}
           <code className="bg-slate-100 px-1.5 py-0.5 rounded font-mono">l4, description, aiCategory, systems (pipe-separated), owner, company, availability</code>
         </div>
+
       </div>
 
       {csvPreview && (

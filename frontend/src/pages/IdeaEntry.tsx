@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import {
-  Zap, Send, CheckCircle2, XCircle, Loader2, AlertCircle,
+  Zap, CheckCircle2, XCircle, AlertCircle,
   RotateCcw, FileText, Building2, Briefcase, Globe, ChevronRight, Upload,
-  Pencil, Trash2, RefreshCw,
+  Pencil, Trash2, RefreshCw, Sparkles, ShieldCheck, History,
 } from 'lucide-react';
 import { Layout } from '../components/Layout';
 import { ReportDashboard } from '../components/ReportDashboard';
@@ -111,6 +111,8 @@ export const IdeaEntry: React.FC = () => {
       if (profile.client_company && !clientCompany) setClientCompany(profile.client_company);
     }
   }, [profile]);
+
+  const [isDragOver, setIsDragOver] = useState(false);
 
   const canAnalyze = industry.trim() && consultingCompany.trim() && clientCompany.trim() && problemStatement.trim();
 
@@ -234,10 +236,26 @@ export const IdeaEntry: React.FC = () => {
     e.target.value = '';
   };
 
-  // ─── Shared styles ──────────────────────────────────────────────────
+  const handleDragOver = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    setIsDragOver(true);
+  };
 
-  const inputCls =
-    'w-full text-sm border border-slate-200 rounded-xl px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-accent-400 bg-white placeholder:text-slate-400';
+  const handleDragLeave = () => setIsDragOver(false);
+
+  const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    setIsDragOver(false);
+    const file = e.dataTransfer.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = ev => {
+      const text = ev.target?.result as string;
+      setProblemStatement(text.trim());
+      setUploadedFileName(file.name);
+    };
+    reader.readAsText(file);
+  };
 
   // ─── Render helpers ──────────────────────────────────────────────────
 
@@ -270,83 +288,141 @@ export const IdeaEntry: React.FC = () => {
   // ─── Phase: INPUT ────────────────────────────────────────────────────
 
   const renderInputPhase = () => (
-    <div className="max-w-3xl mx-auto">
-      <div className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
-        {/* Header */}
-        <div className="bg-gradient-to-r from-accent-600 to-violet-600 px-8 py-6 text-white">
-          <div className="flex items-center gap-3 mb-2">
-            <div className="bg-white/20 p-2 rounded-xl">
-              <Zap className="w-6 h-6" />
-            </div>
-            <h2 className="text-xl font-bold">Intelligence Engine</h2>
-          </div>
-          <p className="text-white/80 text-sm">
-            Enter your opportunity canvas below. The multi-agent system will analyze it across
-            capabilities, journeys, systems, and financials.
-          </p>
-        </div>
+    <div>
+      {/* Main Form Card */}
+      <div className="bg-white rounded-lg relative overflow-hidden shadow-sm">
+        {/* Vertical Accent Bar */}
+        <div className="absolute left-0 top-0 bottom-0 w-1 bg-[#4648d4]" />
 
-        {/* Form */}
-        <div className="p-8 space-y-5">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            {/* Industry */}
-            <div>
-              <label className="text-sm font-medium text-slate-700 mb-1.5 flex items-center gap-1.5">
-                <Globe className="w-3.5 h-3.5 text-slate-400" /> Industry Category
-              </label>
-              <select className={inputCls} value={industry} onChange={e => setIndustry(e.target.value)}>
-                <option value="">Select industry...</option>
-                {INDUSTRY_OPTIONS.map(opt => (
-                  <option key={opt} value={opt}>{opt}</option>
-                ))}
-              </select>
+        <div className="p-10 space-y-12">
+
+          {/* ── Section 01: Entity Definitions ── */}
+          <section>
+            <div className="flex items-center gap-4 mb-6">
+              <span className="w-8 h-8 rounded-full bg-[#dbe2f9] flex items-center justify-center text-[#5c6477] text-xs font-bold flex-shrink-0">
+                01
+              </span>
+              <h3 className="text-xl font-bold">Entity Definitions</h3>
             </div>
 
-            {/* Consulting Company */}
-            <div>
-              <label className="text-sm font-medium text-slate-700 mb-1.5 flex items-center gap-1.5">
-                <Briefcase className="w-3.5 h-3.5 text-slate-400" /> Consulting Company
-              </label>
-              <input
-                className={inputCls}
-                placeholder="e.g., Incedo Technology"
-                value={consultingCompany}
-                onChange={e => setConsultingCompany(e.target.value)}
-              />
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-8 ml-12">
+              {/* Consulting Company */}
+              <div className="space-y-2">
+                <label className="block text-[10px] text-slate-500 font-bold uppercase tracking-widest">
+                  Consulting Company
+                </label>
+                <input
+                  className="w-full bg-[#f1f3ff] border-0 border-b-2 border-transparent focus:border-[#006190] focus:ring-0 focus:bg-white transition-all px-0 py-3 text-[#141b2c] font-medium placeholder:text-slate-300 rounded-none outline-none"
+                  placeholder="e.g., Incedo Technology"
+                  value={consultingCompany}
+                  onChange={e => setConsultingCompany(e.target.value)}
+                />
+              </div>
+
+              {/* Client Company */}
+              <div className="space-y-2">
+                <label className="block text-[10px] text-slate-500 font-bold uppercase tracking-widest">
+                  Client Company
+                </label>
+                <input
+                  className="w-full bg-[#f1f3ff] border-0 border-b-2 border-transparent focus:border-[#006190] focus:ring-0 focus:bg-white transition-all px-0 py-3 text-[#141b2c] font-medium placeholder:text-slate-300 rounded-none outline-none"
+                  placeholder="e.g., Verizon"
+                  value={clientCompany}
+                  onChange={e => setClientCompany(e.target.value)}
+                />
+              </div>
+
+              {/* Industry Category — pill selector */}
+              <div className="space-y-2 md:col-span-2">
+                <label className="block text-[10px] text-slate-500 font-bold uppercase tracking-widest">
+                  Industry Category
+                </label>
+                <div className="flex flex-wrap gap-2 pt-2">
+                  {INDUSTRY_OPTIONS.map(opt => (
+                    <button
+                      key={opt}
+                      type="button"
+                      onClick={() => setIndustry(opt)}
+                      className={cn(
+                        'px-4 py-1.5 rounded-full text-xs font-semibold cursor-pointer transition-colors',
+                        industry === opt
+                          ? 'bg-[#007bb5] text-white'
+                          : 'bg-[#dbe2f9] text-[#5c6477] hover:bg-[#007bb5] hover:text-white',
+                      )}
+                    >
+                      {opt}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </section>
+
+          {/* ── Section 02: Narrative Core ── */}
+          <section>
+            <div className="flex items-center gap-4 mb-6">
+              <span className="w-8 h-8 rounded-full bg-[#dbe2f9] flex items-center justify-center text-[#5c6477] text-xs font-bold flex-shrink-0">
+                02
+              </span>
+              <h3 className="text-xl font-bold">Narrative Core</h3>
             </div>
 
-            {/* Client Company */}
-            <div>
-              <label className="text-sm font-medium text-slate-700 mb-1.5 flex items-center gap-1.5">
-                <Building2 className="w-3.5 h-3.5 text-slate-400" /> Client Company
-              </label>
-              <input
-                className={inputCls}
-                placeholder="e.g., Verizon"
-                value={clientCompany}
-                onChange={e => setClientCompany(e.target.value)}
-              />
-            </div>
-          </div>
+            <div className="ml-12 space-y-8">
+              {/* Problem Statement */}
+              <div className="space-y-2">
+                <label className="block text-[10px] text-slate-500 font-bold uppercase tracking-widest">
+                  Problem or Idea Statement
+                </label>
+                <textarea
+                  className="w-full bg-[#f1f3ff] border-0 border-b-2 border-transparent focus:border-[#006190] focus:ring-0 focus:bg-white transition-all px-0 py-3 text-[#141b2c] font-medium placeholder:text-slate-300 resize-none rounded-none outline-none"
+                  rows={5}
+                  placeholder="Describe the business problem, opportunity, or idea you want to analyze. Include any relevant context about the client's goals, challenges, and requirements..."
+                  value={problemStatement}
+                  onChange={e => { setProblemStatement(e.target.value); setUploadedFileName(null); }}
+                />
+                <p className="text-xs text-slate-400 text-right">{problemStatement.length} characters</p>
+              </div>
 
-          {/* Problem Statement */}
-          <div>
-            <div className="flex items-center justify-between mb-1.5">
-              <label className="text-sm font-medium text-slate-700 flex items-center gap-1.5">
-                <FileText className="w-3.5 h-3.5 text-slate-400" /> Problem or Idea Statement
-              </label>
-              <div className="flex items-center gap-2">
-                {uploadedFileName && (
-                  <span className="text-xs text-emerald-600 font-medium">{uploadedFileName}</span>
-                )}
-                <button
-                  type="button"
+              {/* Supporting Data — drag-and-drop zone */}
+              <div className="space-y-2">
+                <label className="block text-[10px] text-slate-500 font-bold uppercase tracking-widest">
+                  Supporting Data
+                </label>
+                <div
                   onClick={() => fileInputRef.current?.click()}
-                  className="flex items-center gap-1.5 text-xs font-medium text-accent-600 hover:text-accent-700 px-2.5 py-1.5 rounded-lg border border-accent-200 hover:bg-accent-50 transition-colors"
+                  onDragOver={handleDragOver}
+                  onDragLeave={handleDragLeave}
+                  onDrop={handleDrop}
+                  className={cn(
+                    'w-full border-2 border-dashed rounded-lg p-12 text-center cursor-pointer flex flex-col items-center gap-4 transition-colors',
+                    isDragOver
+                      ? 'border-[#006190] bg-[#f1f3ff]'
+                      : 'border-[#bfc7d1]/50 bg-[#f1f3ff]/30 hover:bg-[#f1f3ff]',
+                  )}
                 >
-                  <Upload className="w-3.5 h-3.5" />
-                  Upload .txt
-                </button>
+                  <div className={cn(
+                    'w-16 h-16 rounded-full bg-white flex items-center justify-center shadow-sm transition-transform',
+                    isDragOver && 'scale-110',
+                  )}>
+                    <Upload className={cn('w-7 h-7', isDragOver ? 'text-[#006190]' : 'text-[#0284c7]')} />
+                  </div>
+                  <div>
+                    {uploadedFileName ? (
+                      <>
+                        <p className="text-[#141b2c] font-bold">{uploadedFileName}</p>
+                        <p className="text-sm text-slate-500 mt-1">Click to replace or drag a new file</p>
+                      </>
+                    ) : (
+                      <>
+                        <p className="text-[#141b2c] font-bold">Upload .txt</p>
+                        <p className="text-sm text-slate-500 mt-1">Drag and drop raw analytical data or click to browse</p>
+                      </>
+                    )}
+                  </div>
+                  <div className="text-[10px] uppercase tracking-wider text-[#4648d4] bg-[#4648d4]/10 px-3 py-1 rounded">
+                    Max 50MB per file
+                  </div>
+                </div>
                 <input
                   ref={fileInputRef}
                   type="file"
@@ -356,32 +432,57 @@ export const IdeaEntry: React.FC = () => {
                 />
               </div>
             </div>
-            <textarea
-              className={cn(inputCls, 'resize-none')}
-              rows={10}
-              placeholder="Describe the business problem, opportunity, or idea you want to analyze. Include any relevant context about the client's goals, challenges, and requirements..."
-              value={problemStatement}
-              onChange={e => { setProblemStatement(e.target.value); setUploadedFileName(null); }}
-            />
-            <p className="mt-1 text-xs text-slate-400 text-right">
-              {problemStatement.length} characters
-            </p>
-          </div>
+          </section>
 
-          {/* Analyze Button */}
-          <button
-            onClick={handleAnalyze}
-            disabled={!canAnalyze}
-            className={cn(
-              'w-full flex items-center justify-center gap-2 font-semibold py-3 px-6 rounded-xl transition-colors text-base',
-              canAnalyze
-                ? 'bg-accent-600 text-white hover:bg-accent-700 shadow-sm'
-                : 'bg-slate-100 text-slate-400 cursor-not-allowed',
-            )}
-          >
-            <Zap className="w-5 h-5" />
-            ANALYZE
-          </button>
+          {/* ── Form Actions ── */}
+          <div className="pt-8 border-t border-[#bfc7d1]/20 flex items-center justify-between">
+            <button
+              type="button"
+              onClick={handleReset}
+              className="text-slate-500 font-bold text-xs uppercase tracking-wider hover:text-[#141b2c] transition-colors"
+            >
+              Discard Draft
+            </button>
+            <button
+              type="button"
+              onClick={handleAnalyze}
+              disabled={!canAnalyze}
+              className={cn(
+                'px-10 py-4 rounded font-bold tracking-wide flex items-center gap-3 transition-all text-white',
+                canAnalyze
+                  ? 'bg-gradient-to-br from-[#006190] to-[#007bb5] hover:shadow-[0px_12px_40px_rgba(0,97,144,0.3)] active:scale-95'
+                  : 'bg-slate-300 cursor-not-allowed',
+              )}
+            >
+              <span>ANALYZE</span>
+              <Zap className="w-5 h-5" />
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* ── Contextual Insight Footer ── */}
+      <div className="mt-12 grid grid-cols-1 md:grid-cols-3 gap-6">
+        <div className="p-6 bg-[#f1f3ff] rounded-lg">
+          <Sparkles className="w-5 h-5 text-[#4648d4] mb-3" />
+          <p className="text-xs font-bold uppercase tracking-wider text-slate-500 mb-2">AI Tip</p>
+          <p className="text-sm text-[#3f4850] leading-relaxed">
+            Detailed "Problem Statements" result in 40% higher accuracy in capability mapping.
+          </p>
+        </div>
+        <div className="p-6 bg-[#f1f3ff] rounded-lg">
+          <ShieldCheck className="w-5 h-5 text-[#006190] mb-3" />
+          <p className="text-xs font-bold uppercase tracking-wider text-slate-500 mb-2">Institutional Logic</p>
+          <p className="text-sm text-[#3f4850] leading-relaxed">
+            All entries are encrypted and cross-referenced against the internal Strategy Ruleset.
+          </p>
+        </div>
+        <div className="p-6 bg-[#f1f3ff] rounded-lg">
+          <History className="w-5 h-5 text-[#565e71] mb-3" />
+          <p className="text-xs font-bold uppercase tracking-wider text-slate-500 mb-2">Audit Ready</p>
+          <p className="text-sm text-[#3f4850] leading-relaxed">
+            Uploads are automatically versioned and timestamped for the Admin Panel.
+          </p>
         </div>
       </div>
     </div>
@@ -573,14 +674,15 @@ export const IdeaEntry: React.FC = () => {
 
   return (
     <Layout>
-      <div className="mb-4 md:mb-6">
-        <div className="flex items-center gap-2 text-xs text-slate-400 mb-2 md:mb-4">
-          <span>Dashboard</span>
-          <ChevronRight className="w-3 h-3" />
-          <span className="text-slate-700 font-medium">Idea Entry</span>
-        </div>
-        <h1 className="text-2xl md:text-3xl font-display font-bold text-slate-900">Idea Entry</h1>
-        <p className="text-slate-500 mt-1 text-sm md:text-base">Submit an opportunity canvas and let the multi-agent system generate a comprehensive business capability analysis.</p>
+      <div className="mb-10">
+        <nav className="mb-8 flex items-center gap-2 text-sm">
+          <span className="text-slate-500">Dashboard</span>
+          <ChevronRight className="w-3 h-3 text-slate-400" />
+          <span className="text-[#006190] font-semibold">Idea Entry</span>
+        </nav>
+        <p className="text-xs font-bold uppercase tracking-widest text-[#4648d4] mb-1">Architecture Initialization</p>
+        <h1 className="text-4xl font-extrabold text-[#141b2c] tracking-tight">New Strategic Concept</h1>
+        <p className="text-slate-500 mt-2 max-w-2xl">Enter the core parameters for your next financial analysis. The Intelligence Engine will process these inputs to generate a comprehensive viability report.</p>
       </div>
 
       {phase === 'input' && renderInputPhase()}

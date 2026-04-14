@@ -21,6 +21,11 @@ __pycache__/
 # Build artifacts
 frontend/dist/
 
+# Secrets
+.env
+backend/.env
+**/.env
+
 # Misc
 business-analyzer-main/
 .claude/

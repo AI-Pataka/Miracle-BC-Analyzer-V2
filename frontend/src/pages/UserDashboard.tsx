@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { Layout } from '../components/Layout';
-import { Calendar, Mail, Shield, User, Building2, Briefcase, Globe, Save, Check } from 'lucide-react';
 import { doc, updateDoc } from 'firebase/firestore';
 import { db } from '../firebase';
+import { useNavigate } from 'react-router-dom';
 
 const INDUSTRY_OPTIONS = [
   'Telecommunications',
@@ -20,9 +20,10 @@ const INDUSTRY_OPTIONS = [
 
 export const UserDashboard: React.FC = () => {
   const { profile, user } = useAuth();
+  const navigate = useNavigate();
 
-  const [industry, setIndustry] = useState('Telecommunications');
-  const [clientCompany, setClientCompany] = useState('Verizon');
+  const [industry, setIndustry] = useState('');
+  const [clientCompany, setClientCompany] = useState('');
   const [consultantName, setConsultantName] = useState('');
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -37,7 +38,8 @@ export const UserDashboard: React.FC = () => {
     }
   }, [profile]);
 
-  const handleSaveSetup = async () => {
+  const handleSaveSetup = async (e: React.FormEvent) => {
+    e.preventDefault();
     if (!user) return;
     setSaving(true);
     setSaveError(null);
@@ -57,132 +59,251 @@ export const UserDashboard: React.FC = () => {
     }
   };
 
-  const inputCls =
-    'w-full text-sm border border-slate-200 rounded-xl px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-accent-400 bg-white placeholder:text-slate-400';
+  const handleResetDefaults = () => {
+    setIndustry(profile?.industry || '');
+    setClientCompany(profile?.client_company || '');
+    setConsultantName(profile?.consultant_name || '');
+    setSaveError(null);
+    setSaved(false);
+  };
+
+  const fieldCls =
+    'w-full bg-surface-container-low border-0 rounded-sm px-4 py-4 text-on-surface text-sm font-medium focus:bg-surface-container-lowest focus:outline-none focus:ring-0 border-b-2 border-transparent focus:border-primary transition-all';
 
   return (
     <Layout>
-      <div className="max-w-4xl mx-auto">
-        <header className="mb-8">
-          <h1 className="text-2xl md:text-3xl font-display font-bold text-slate-900 break-words">Welcome, {profile?.display_name}!</h1>
-          <p className="text-slate-600 mt-2 text-sm md:text-base">Manage your profile and configure your default project context.</p>
-        </header>
+      <div className="max-w-7xl mx-auto space-y-12">
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          {/* Profile Details */}
-          <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
-            <h2 className="text-lg font-bold text-slate-900 mb-4 flex items-center gap-2">
-              <User className="w-5 h-5 text-accent-500" />
-              Profile Details
-            </h2>
-            <div className="space-y-4">
-              <div className="flex flex-wrap items-center justify-between gap-2 py-2 border-b border-slate-50">
-                <span className="text-slate-500 text-sm flex items-center gap-2">
-                  <Mail className="w-4 h-4 flex-shrink-0" /> Email
-                </span>
-                <span className="text-slate-900 font-medium text-sm break-all">{profile?.email}</span>
+        {/* Hero */}
+        <section>
+          <p className="uppercase tracking-widest text-primary text-xs font-semibold mb-2 font-label">User Dashboard</p>
+          <h1 className="text-3xl xl:text-4xl font-extrabold tracking-tight text-on-surface font-headline">
+            Welcome, {profile?.display_name}!
+          </h1>
+        </section>
+
+        {/* Main Grid */}
+        <div className="grid grid-cols-12 gap-8">
+
+          {/* Left col — Profile Details + Decorative Card */}
+          <div className="col-span-12 lg:col-span-5 space-y-6">
+
+            {/* Profile Details */}
+            <div className="bg-surface-container-lowest p-8 xl:p-10 rounded-md shadow-[0px_4px_20px_rgba(20,27,44,0.04)] relative overflow-hidden">
+              <div className="absolute left-0 top-10 w-1 h-12 bg-tertiary rounded-r" />
+              <p className="uppercase tracking-widest text-primary text-[10px] font-semibold mb-6 font-label">System Identity</p>
+              <h3 className="text-2xl font-bold font-headline mb-8">Profile Details</h3>
+              <div className="space-y-6">
+                <div className="flex items-start gap-4">
+                  <div className="w-10 h-10 rounded bg-surface-container-low flex items-center justify-center text-primary flex-shrink-0">
+                    <span className="material-symbols-outlined text-[20px]">mail</span>
+                  </div>
+                  <div>
+                    <p className="uppercase tracking-widest text-[10px] text-slate-500 font-semibold mb-0.5 font-label">Email Address</p>
+                    <p className="font-semibold text-on-surface text-sm break-all">{profile?.email}</p>
+                  </div>
+                </div>
+                <div className="flex items-start gap-4">
+                  <div className="w-10 h-10 rounded bg-surface-container-low flex items-center justify-center text-primary flex-shrink-0">
+                    <span className="material-symbols-outlined text-[20px]">badge</span>
+                  </div>
+                  <div>
+                    <p className="uppercase tracking-widest text-[10px] text-slate-500 font-semibold mb-0.5 font-label">System Role</p>
+                    <p className="font-semibold text-on-surface capitalize">{profile?.role}</p>
+                  </div>
+                </div>
+                <div className="flex items-start gap-4">
+                  <div className="w-10 h-10 rounded bg-surface-container-low flex items-center justify-center text-primary flex-shrink-0">
+                    <span className="material-symbols-outlined text-[20px]">calendar_today</span>
+                  </div>
+                  <div>
+                    <p className="uppercase tracking-widest text-[10px] text-slate-500 font-semibold mb-0.5 font-label">Member Since</p>
+                    <p className="font-semibold text-on-surface">{profile?.created_at?.toDate().toLocaleDateString()}</p>
+                  </div>
+                </div>
               </div>
-              <div className="flex items-center justify-between py-2 border-b border-slate-50">
-                <span className="text-slate-500 text-sm flex items-center gap-2">
-                  <Shield className="w-4 h-4" /> Role
-                </span>
-                <span className="text-accent-600 font-bold capitalize">{profile?.role}</span>
+            </div>
+
+            {/* Decorative Intelligence Card */}
+            <div className="bg-primary p-8 rounded-md text-white overflow-hidden relative">
+              <div className="relative z-10">
+                <h4 className="font-headline font-bold text-lg mb-2">Need a New Analysis?</h4>
+                <p className="text-white/80 text-sm mb-6 leading-relaxed">
+                  Initiate a fresh architectural review using our intelligence engine.
+                </p>
+                <button
+                  onClick={() => navigate('/idea-entry')}
+                  className="bg-white text-primary px-6 py-2 rounded-lg font-bold text-sm hover:bg-white/90 transition-all"
+                >
+                  Launch Analysis
+                </button>
               </div>
-              <div className="flex items-center justify-between py-2">
-                <span className="text-slate-500 text-sm flex items-center gap-2">
-                  <Calendar className="w-4 h-4" /> Member Since
-                </span>
-                <span className="text-slate-900 font-medium">
-                  {profile?.created_at?.toDate().toLocaleDateString()}
-                </span>
-              </div>
+              <span className="material-symbols-outlined absolute -right-4 -bottom-4 text-[7rem] text-white/10 pointer-events-none select-none">
+                finance
+              </span>
             </div>
           </div>
 
-          {/* User Setup / Context Configuration */}
-          <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
-            <h2 className="text-lg font-bold text-slate-900 mb-4 flex items-center gap-2">
-              <Briefcase className="w-5 h-5 text-accent-500" />
-              Project Context Setup
-            </h2>
-            <p className="text-xs text-slate-500 mb-4">
-              These defaults auto-populate the global header and Idea Entry form.
-            </p>
+          {/* Right col — Project Context Form + Insight Bento */}
+          <div className="col-span-12 lg:col-span-7">
+            <div className="bg-surface-container-lowest p-8 xl:p-10 rounded-md shadow-[0px_4px_20px_rgba(20,27,44,0.04)]">
+              <p className="uppercase tracking-widest text-primary text-[10px] font-semibold mb-6 font-label">Active Engagement</p>
+              <h3 className="text-2xl font-bold font-headline mb-8">Project Context Setup</h3>
 
-            <div className="space-y-4">
-              {/* Industry */}
-              <div>
-                <label className="text-sm font-medium text-slate-700 mb-1 flex items-center gap-1.5">
-                  <Globe className="w-3.5 h-3.5 text-slate-400" /> Industry
-                </label>
-                <select
-                  className={inputCls}
-                  value={industry}
-                  onChange={e => setIndustry(e.target.value)}
-                >
-                  <option value="">Select an industry...</option>
-                  {INDUSTRY_OPTIONS.map(opt => (
-                    <option key={opt} value={opt}>{opt}</option>
-                  ))}
-                </select>
-              </div>
+              <form className="space-y-8" onSubmit={handleSaveSetup}>
+                {/* Industry Sector */}
+                <div className="space-y-2">
+                  <label htmlFor="industry-select" className="uppercase tracking-widest text-[11px] text-slate-500 font-semibold ml-1 font-label">
+                    Industry Sector
+                  </label>
+                  <div className="relative">
+                    <select
+                      id="industry-select"
+                      className={fieldCls + ' appearance-none pr-10'}
+                      value={industry}
+                      onChange={e => setIndustry(e.target.value)}
+                    >
+                      <option value="">Select an industry...</option>
+                      {INDUSTRY_OPTIONS.map(opt => (
+                        <option key={opt} value={opt}>{opt}</option>
+                      ))}
+                    </select>
+                    <span className="material-symbols-outlined absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none text-[20px]">
+                      expand_more
+                    </span>
+                  </div>
+                </div>
 
-              {/* Client Company */}
-              <div>
-                <label className="text-sm font-medium text-slate-700 mb-1 flex items-center gap-1.5">
-                  <Building2 className="w-3.5 h-3.5 text-slate-400" /> Client Company
-                </label>
-                <input
-                  className={inputCls}
-                  placeholder="e.g., Verizon"
-                  value={clientCompany}
-                  onChange={e => setClientCompany(e.target.value)}
-                />
-              </div>
+                {/* Client Company */}
+                <div className="space-y-2">
+                  <label className="uppercase tracking-widest text-[11px] text-slate-500 font-semibold ml-1 font-label">
+                    Client Company
+                  </label>
+                  <input
+                    className={fieldCls}
+                    placeholder="Enter corporate entity name..."
+                    value={clientCompany}
+                    onChange={e => setClientCompany(e.target.value)}
+                  />
+                </div>
 
-              {/* Consultant Name */}
-              <div>
-                <label className="text-sm font-medium text-slate-700 mb-1 flex items-center gap-1.5">
-                  <Briefcase className="w-3.5 h-3.5 text-slate-400" /> Consultant / Role
-                </label>
-                <input
-                  className={inputCls}
-                  placeholder="e.g., John Smith — Lead Architect"
-                  value={consultantName}
-                  onChange={e => setConsultantName(e.target.value)}
-                />
-              </div>
+                {/* Consultant + Access Level */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+                  <div className="space-y-2">
+                    <label className="uppercase tracking-widest text-[11px] text-slate-500 font-semibold ml-1 font-label">
+                      Consultant / Role
+                    </label>
+                    <input
+                      className={fieldCls}
+                      placeholder="e.g., John Smith — Lead Architect"
+                      value={consultantName}
+                      onChange={e => setConsultantName(e.target.value)}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="uppercase tracking-widest text-[11px] text-slate-500 font-semibold ml-1 font-label">
+                      Access Level
+                    </label>
+                    <div className="flex flex-wrap items-center gap-2 py-4">
+                      <span className="px-3 py-1 bg-secondary-container text-on-secondary-container text-xs font-bold rounded-full uppercase tracking-wider">
+                        {profile?.role === 'admin' ? 'Full Access' : 'Standard'}
+                      </span>
+                      <span className="px-3 py-1 bg-tertiary-fixed text-on-tertiary-fixed-variant text-xs font-bold rounded-full uppercase tracking-wider">
+                        Encrypted
+                      </span>
+                    </div>
+                  </div>
+                </div>
 
-              {/* Save */}
-              {saveError && (
-                <p className="text-xs text-rose-600 bg-rose-50 px-3 py-2 rounded-lg">{saveError}</p>
-              )}
-
-              <button
-                onClick={handleSaveSetup}
-                disabled={saving}
-                className="w-full flex items-center justify-center gap-2 bg-accent-600 text-white font-semibold py-2.5 px-4 rounded-xl hover:bg-accent-700 transition-colors disabled:opacity-60"
-              >
-                {saving ? (
-                  <>
-                    <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                    Saving...
-                  </>
-                ) : saved ? (
-                  <>
-                    <Check className="w-4 h-4" />
-                    Saved!
-                  </>
-                ) : (
-                  <>
-                    <Save className="w-4 h-4" />
-                    Save Context
-                  </>
+                {saveError && (
+                  <p className="text-xs text-error bg-error-container px-3 py-2 rounded-lg">{saveError}</p>
                 )}
-              </button>
+
+                {/* Actions */}
+                <div className="pt-6 flex justify-end items-center gap-6 border-t border-slate-100">
+                  <button
+                    type="button"
+                    onClick={handleResetDefaults}
+                    className="text-primary font-bold text-sm hover:underline"
+                  >
+                    Reset Defaults
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={saving}
+                    className="bg-gradient-to-br from-primary to-primary-container text-white px-8 py-3 rounded-lg font-bold text-sm shadow-lg hover:shadow-xl transition-all active:scale-95 disabled:opacity-60 flex items-center gap-2"
+                  >
+                    {saving ? (
+                      <>
+                        <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                        Saving...
+                      </>
+                    ) : saved ? (
+                      <>
+                        <span className="material-symbols-outlined text-[18px]">check_circle</span>
+                        Saved!
+                      </>
+                    ) : (
+                      <>
+                        <span className="material-symbols-outlined text-[18px]">save</span>
+                        Save Context
+                      </>
+                    )}
+                  </button>
+                </div>
+              </form>
+            </div>
+
+            {/* Intelligence Insights Bento */}
+            <div className="mt-8 grid grid-cols-2 gap-6">
+              <div className="bg-surface-container-lowest p-6 rounded-md shadow-sm flex items-center gap-4">
+                <div className="p-3 bg-surface-container-low text-tertiary rounded flex-shrink-0">
+                  <span className="material-symbols-outlined">monitoring</span>
+                </div>
+                <div>
+                  <p className="text-2xl font-bold font-headline">14</p>
+                  <p className="uppercase tracking-widest text-[10px] text-slate-500 font-semibold font-label">Active Journeys</p>
+                </div>
+              </div>
+              <div className="bg-surface-container-lowest p-6 rounded-md shadow-sm flex items-center gap-4">
+                <div className="p-3 bg-surface-container-low text-primary rounded flex-shrink-0">
+                  <span className="material-symbols-outlined">verified_user</span>
+                </div>
+                <div>
+                  <p className="text-2xl font-bold font-headline">98.2%</p>
+                  <p className="uppercase tracking-widest text-[10px] text-slate-500 font-semibold font-label">Compliance Rate</p>
+                </div>
+              </div>
             </div>
           </div>
         </div>
+
+        {/* Footer Info Strip */}
+        <section className="pt-10 border-t border-slate-200 grid grid-cols-1 md:grid-cols-3 gap-10">
+          <div className="space-y-3">
+            <h5 className="uppercase tracking-widest text-xs text-primary font-semibold font-label">System Integrity</h5>
+            <p className="text-sm text-slate-600 leading-relaxed">
+              All financial architectural models are encrypted using AES-256 standards. Your session is monitored for security compliance.
+            </p>
+          </div>
+          <div className="space-y-3">
+            <h5 className="uppercase tracking-widest text-xs text-primary font-semibold font-label">Quick Links</h5>
+            <ul className="text-sm font-medium space-y-2 text-on-surface">
+              <li><a className="hover:text-primary transition-colors" href="#">Documentation Portal</a></li>
+              <li><a className="hover:text-primary transition-colors" href="#">Audit Logs</a></li>
+              <li><a className="hover:text-primary transition-colors" href="#">Security Settings</a></li>
+            </ul>
+          </div>
+          <div className="space-y-3">
+            <h5 className="uppercase tracking-widest text-xs text-primary font-semibold font-label">Intelligence Status</h5>
+            <div className="flex items-center gap-2">
+              <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+              <span className="text-sm font-semibold">Engine Online</span>
+            </div>
+            <p className="text-xs text-slate-400">Last updated: 2 mins ago</p>
+          </div>
+        </section>
+
       </div>
     </Layout>
   );
