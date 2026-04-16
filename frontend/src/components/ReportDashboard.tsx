@@ -1,14 +1,15 @@
 import React, { useState, useRef, useEffect } from 'react';
-import ReactMarkdown from 'react-markdown';
 import {
   Target, BarChart3, Layers, Route, Server, DollarSign,
   Calendar, AlertTriangle, Grid3X3, Shield, Lightbulb,
   ClipboardList, ChevronDown, ChevronRight, FileText,
   TrendingUp, Zap, CheckCircle2, ArrowRight, BookOpen,
+  TrendingDown, Minus,
 } from 'lucide-react';
 import {
   parseReport, parseMarkdownTable, extractBullets, extractKeyValues,
-  type ReportSection, type ParsedReport, type SectionType,
+  extractKPIs, extractSwotQuadrants, extractPortersForces, stripMarkdown,
+  type ReportSection, type SectionType,
 } from '../lib/reportParser';
 
 // ─── Icon map for section types ────────────────────────────────────────────
@@ -51,7 +52,53 @@ const SECTION_COLORS: Record<SectionType, string> = {
   generic: 'from-slate-500 to-slate-700',
 };
 
-// ─── Section Components ────────────────────────────────────────────────────
+// ─── Plain content renderer (no ReactMarkdown) ─────────────────────────────
+
+const PlainContent: React.FC<{ content: string; className?: string }> = ({ content, className = '' }) => {
+  const lines = content.split('\n').filter(l => l.trim());
+  return (
+    <div className={`space-y-2 ${className}`}>
+      {lines.map((line, i) => {
+        if (/^#+\s/.test(line)) return null; // skip section headings
+        if (/^\s*[-*•✅]\s/.test(line)) {
+          return (
+            <div key={i} className="flex items-start gap-2">
+              <ArrowRight className="w-3 h-3 mt-1 text-slate-400 flex-shrink-0" />
+              <span className="text-sm text-slate-700 leading-relaxed">
+                {stripMarkdown(line.replace(/^\s*[-*•✅]\s+/, ''))}
+              </span>
+            </div>
+          );
+        }
+        const clean = stripMarkdown(line);
+        if (!clean) return null;
+        return <p key={i} className="text-sm text-slate-700 leading-relaxed">{clean}</p>;
+      })}
+    </div>
+  );
+};
+
+// ─── Section Wrapper ───────────────────────────────────────────────────────
+
+const SectionWrapper: React.FC<{
+  section: ReportSection;
+  children: React.ReactNode;
+  noHeader?: boolean;
+}> = ({ section, children, noHeader }) => (
+  <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+    {!noHeader && (
+      <div className={`bg-gradient-to-r ${SECTION_COLORS[section.type]} px-6 py-4 flex items-center gap-3`}>
+        <div className="bg-white/20 p-2 rounded-lg text-white flex-shrink-0">
+          {SECTION_ICONS[section.type]}
+        </div>
+        <h3 className="text-lg font-bold text-white break-words min-w-0">{stripMarkdown(section.title)}</h3>
+      </div>
+    )}
+    <div className="p-6 min-w-0 overflow-hidden">{children}</div>
+  </div>
+);
+
+// ─── Hero Section ──────────────────────────────────────────────────────────
 
 const HeroSection: React.FC<{ section: ReportSection }> = ({ section }) => (
   <div className="bg-gradient-to-br from-accent-600 to-violet-700 rounded-2xl p-6 md:p-8 text-white shadow-lg overflow-hidden">
@@ -59,30 +106,172 @@ const HeroSection: React.FC<{ section: ReportSection }> = ({ section }) => (
       <div className="bg-white/20 p-2.5 rounded-xl flex-shrink-0">
         <Target className="w-6 h-6" />
       </div>
-      <h2 className="text-xl md:text-2xl font-bold break-words min-w-0">{section.title}</h2>
+      <h2 className="text-xl md:text-2xl font-bold break-words min-w-0">{stripMarkdown(section.title)}</h2>
     </div>
-    <div className="text-white/90 leading-relaxed text-sm md:text-base break-words">
-      {section.content.split('\n').filter(l => l.trim() && !l.startsWith('#')).map((line, i) => (
-        <p key={i} className="mb-3">{line.replace(/\*\*/g, '')}</p>
+    <div className="text-white/90 leading-relaxed text-sm md:text-base break-words space-y-2">
+      {section.content.split('\n').filter(l => l.trim() && !/^#+/.test(l)).map((line, i) => (
+        <p key={i}>{stripMarkdown(line)}</p>
       ))}
     </div>
   </div>
 );
 
-const KPISection: React.FC<{ section: ReportSection }> = ({ section }) => {
-  const bullets = extractBullets(section.content);
-  const colors = ['bg-emerald-50 text-emerald-700 border-emerald-200', 'bg-blue-50 text-blue-700 border-blue-200', 'bg-violet-50 text-violet-700 border-violet-200', 'bg-amber-50 text-amber-700 border-amber-200', 'bg-rose-50 text-rose-700 border-rose-200', 'bg-cyan-50 text-cyan-700 border-cyan-200'];
+// ─── KPI Section — detailed cards ─────────────────────────────────────────
 
-  if (bullets.length === 0) return <GenericSection section={section} />;
+const KPISection: React.FC<{ section: ReportSection }> = ({ section }) => {
+  const detailedKPIs = extractKPIs(section.content);
+
+  if (detailedKPIs.length === 0) {
+    const bullets = extractBullets(section.content);
+    const colors = [
+      'bg-emerald-50 border-emerald-200',
+      'bg-blue-50 border-blue-200',
+      'bg-violet-50 border-violet-200',
+      'bg-amber-50 border-amber-200',
+      'bg-rose-50 border-rose-200',
+      'bg-cyan-50 border-cyan-200',
+    ];
+    if (bullets.length === 0) return <GenericSection section={section} />;
+    return (
+      <SectionWrapper section={section}>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+          {bullets.map((kpi, i) => (
+            <div key={i} className={`rounded-xl p-5 border ${colors[i % colors.length]}`}>
+              <div className="flex items-start gap-3">
+                <CheckCircle2 className="w-5 h-5 mt-0.5 flex-shrink-0 text-emerald-600" />
+                <p className="text-sm font-medium leading-relaxed text-slate-800">{kpi}</p>
+              </div>
+            </div>
+          ))}
+        </div>
+      </SectionWrapper>
+    );
+  }
+
+  const accentColors = [
+    { bg: 'bg-emerald-500', light: 'bg-emerald-50', border: 'border-emerald-200', text: 'text-emerald-700', badge: 'bg-emerald-100 text-emerald-800' },
+    { bg: 'bg-blue-500', light: 'bg-blue-50', border: 'border-blue-200', text: 'text-blue-700', badge: 'bg-blue-100 text-blue-800' },
+    { bg: 'bg-violet-500', light: 'bg-violet-50', border: 'border-violet-200', text: 'text-violet-700', badge: 'bg-violet-100 text-violet-800' },
+    { bg: 'bg-amber-500', light: 'bg-amber-50', border: 'border-amber-200', text: 'text-amber-700', badge: 'bg-amber-100 text-amber-800' },
+    { bg: 'bg-rose-500', light: 'bg-rose-50', border: 'border-rose-200', text: 'text-rose-700', badge: 'bg-rose-100 text-rose-800' },
+    { bg: 'bg-cyan-500', light: 'bg-cyan-50', border: 'border-cyan-200', text: 'text-cyan-700', badge: 'bg-cyan-100 text-cyan-800' },
+  ];
 
   return (
     <SectionWrapper section={section}>
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-        {bullets.map((kpi, i) => (
-          <div key={i} className={`rounded-xl p-5 border ${colors[i % colors.length]}`}>
-            <div className="flex items-start gap-3">
-              <CheckCircle2 className="w-5 h-5 mt-0.5 flex-shrink-0" />
-              <p className="text-sm font-medium leading-relaxed">{kpi}</p>
+      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-5">
+        {detailedKPIs.map((kpi, i) => {
+          const c = accentColors[i % accentColors.length];
+          return (
+            <div key={i} className={`rounded-2xl border ${c.border} ${c.light} overflow-hidden`}>
+              <div className={`${c.bg} px-4 py-3`}>
+                <p className="text-white font-bold text-sm leading-tight">{kpi.name}</p>
+              </div>
+              <div className="px-4 py-4 space-y-3">
+                {kpi.current && (
+                  <div>
+                    <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-0.5">Current State</p>
+                    <p className="text-sm text-slate-700 leading-snug">{kpi.current}</p>
+                  </div>
+                )}
+                {kpi.target && (
+                  <div>
+                    <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-0.5">Target</p>
+                    <p className={`text-sm font-semibold ${c.text} leading-snug`}>{kpi.target}</p>
+                  </div>
+                )}
+                {kpi.gap && (
+                  <div>
+                    <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-0.5">Gap to Close</p>
+                    <p className="text-sm text-slate-600 leading-snug">{kpi.gap}</p>
+                  </div>
+                )}
+                {(kpi.timeframe || kpi.owner) && (
+                  <div className="flex flex-wrap gap-2 pt-1 border-t border-slate-200">
+                    {kpi.timeframe && (
+                      <span className={`text-[10px] font-semibold px-2.5 py-1 rounded-full ${c.badge}`}>
+                        ⏱ {kpi.timeframe}
+                      </span>
+                    )}
+                    {kpi.owner && (
+                      <span className="text-[10px] font-semibold px-2.5 py-1 rounded-full bg-slate-100 text-slate-600">
+                        👤 {kpi.owner}
+                      </span>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </SectionWrapper>
+  );
+};
+
+// ─── SWOT Section — 4-quadrant visual ─────────────────────────────────────
+
+const SwotSection: React.FC<{ section: ReportSection }> = ({ section }) => {
+  const swot = extractSwotQuadrants(section.content);
+  const hasData = swot.strengths.length + swot.weaknesses.length + swot.opportunities.length + swot.threats.length > 0;
+  if (!hasData) return <GenericSection section={section} />;
+
+  const quadrants = [
+    {
+      label: 'Strengths',
+      items: swot.strengths,
+      icon: <TrendingUp className="w-4 h-4" />,
+      headerClass: 'bg-emerald-600',
+      bodyClass: 'bg-emerald-50',
+      dotClass: 'bg-emerald-500',
+    },
+    {
+      label: 'Weaknesses',
+      items: swot.weaknesses,
+      icon: <TrendingDown className="w-4 h-4" />,
+      headerClass: 'bg-rose-500',
+      bodyClass: 'bg-rose-50',
+      dotClass: 'bg-rose-400',
+    },
+    {
+      label: 'Opportunities',
+      items: swot.opportunities,
+      icon: <Lightbulb className="w-4 h-4" />,
+      headerClass: 'bg-blue-600',
+      bodyClass: 'bg-blue-50',
+      dotClass: 'bg-blue-500',
+    },
+    {
+      label: 'Threats',
+      items: swot.threats,
+      icon: <AlertTriangle className="w-4 h-4" />,
+      headerClass: 'bg-amber-500',
+      bodyClass: 'bg-amber-50',
+      dotClass: 'bg-amber-400',
+    },
+  ];
+
+  return (
+    <SectionWrapper section={section}>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        {quadrants.map((q) => (
+          <div key={q.label} className="rounded-xl overflow-hidden border border-slate-200">
+            <div className={`${q.headerClass} px-4 py-2.5 flex items-center gap-2`}>
+              <span className="text-white">{q.icon}</span>
+              <span className="text-white font-bold text-sm">{q.label}</span>
+              <span className="ml-auto text-white/70 text-xs">{q.items.length}</span>
+            </div>
+            <div className={`${q.bodyClass} p-4 space-y-2 min-h-[100px]`}>
+              {q.items.length === 0 ? (
+                <p className="text-xs text-slate-400 italic">None identified</p>
+              ) : (
+                q.items.map((item, i) => (
+                  <div key={i} className="flex items-start gap-2">
+                    <span className={`mt-1.5 w-2 h-2 rounded-full flex-shrink-0 ${q.dotClass}`} />
+                    <p className="text-sm text-slate-700 leading-snug">{item}</p>
+                  </div>
+                ))
+              )}
             </div>
           </div>
         ))}
@@ -90,6 +279,61 @@ const KPISection: React.FC<{ section: ReportSection }> = ({ section }) => {
     </SectionWrapper>
   );
 };
+
+// ─── Porter's Five Forces Section ─────────────────────────────────────────
+
+const PortersSection: React.FC<{ section: ReportSection }> = ({ section }) => {
+  const forces = extractPortersForces(section.content);
+  if (forces.length === 0) return <GenericSection section={section} />;
+
+  const forceColors = [
+    'border-l-blue-500',
+    'border-l-violet-500',
+    'border-l-emerald-500',
+    'border-l-amber-500',
+    'border-l-rose-500',
+  ];
+
+  return (
+    <SectionWrapper section={section}>
+      <div className="space-y-3">
+        {forces.map((f, i) => (
+          <div key={i} className={`bg-slate-50 rounded-xl border border-slate-200 border-l-4 ${forceColors[i % forceColors.length]} p-4`}>
+            <div className="flex items-center gap-2 mb-1.5">
+              <Shield className="w-4 h-4 text-slate-400 flex-shrink-0" />
+              <h4 className="font-bold text-slate-900 text-sm">{f.name}</h4>
+            </div>
+            <p className="text-sm text-slate-600 leading-relaxed">{f.analysis}</p>
+          </div>
+        ))}
+      </div>
+    </SectionWrapper>
+  );
+};
+
+// ─── Recommendations Section ───────────────────────────────────────────────
+
+const RecommendationsSection: React.FC<{ section: ReportSection }> = ({ section }) => {
+  const bullets = extractBullets(section.content);
+  if (bullets.length === 0) return <GenericSection section={section} />;
+
+  return (
+    <SectionWrapper section={section}>
+      <div className="space-y-3">
+        {bullets.map((rec, i) => (
+          <div key={i} className="flex items-start gap-4 bg-amber-50 border border-amber-100 rounded-xl p-4">
+            <div className="w-7 h-7 rounded-full bg-amber-500 text-white flex items-center justify-center text-xs font-bold flex-shrink-0 mt-0.5">
+              {i + 1}
+            </div>
+            <p className="text-sm text-slate-800 leading-relaxed">{rec}</p>
+          </div>
+        ))}
+      </div>
+    </SectionWrapper>
+  );
+};
+
+// ─── Capabilities Section ──────────────────────────────────────────────────
 
 const CapabilitiesSection: React.FC<{ section: ReportSection }> = ({ section }) => {
   const subs = section.subsections || [];
@@ -102,12 +346,11 @@ const CapabilitiesSection: React.FC<{ section: ReportSection }> = ({ section }) 
           const kvs = extractKeyValues(sub.content);
           const isNew = /\(NEW\)/i.test(sub.title);
           const isEnhance = /\(ENHANCE\)/i.test(sub.title);
-          const cleanTitle = sub.title.replace(/^\d+\.\s*/, '');
-
+          const cleanTitle = stripMarkdown(sub.title.replace(/^\d+\.\s*/, '').replace(/\s*\(NEW\)|\(ENHANCE\)/gi, ''));
           return (
             <div key={i} className="bg-white rounded-xl border border-slate-200 p-5 hover:shadow-md transition-shadow overflow-hidden">
               <div className="flex items-start justify-between mb-3 min-w-0">
-                <h4 className="font-bold text-slate-900 text-sm leading-tight pr-2 break-words min-w-0">{cleanTitle.replace(/\s*\(NEW\)|\(ENHANCE\)/gi, '')}</h4>
+                <h4 className="font-bold text-slate-900 text-sm leading-tight pr-2 break-words min-w-0">{cleanTitle}</h4>
                 <span className={`flex-shrink-0 text-xs font-bold px-2.5 py-1 rounded-full ${
                   isNew ? 'bg-blue-100 text-blue-700' : isEnhance ? 'bg-amber-100 text-amber-700' : 'bg-slate-100 text-slate-600'
                 }`}>
@@ -128,8 +371,7 @@ const CapabilitiesSection: React.FC<{ section: ReportSection }> = ({ section }) 
                 <ul className="space-y-1">
                   {extractBullets(sub.content).map((b, j) => (
                     <li key={j} className="text-xs text-slate-600 flex items-start gap-1.5">
-                      <ArrowRight className="w-3 h-3 mt-0.5 text-slate-400 flex-shrink-0" />
-                      {b}
+                      <ArrowRight className="w-3 h-3 mt-0.5 text-slate-400 flex-shrink-0" />{b}
                     </li>
                   ))}
                 </ul>
@@ -142,6 +384,8 @@ const CapabilitiesSection: React.FC<{ section: ReportSection }> = ({ section }) 
   );
 };
 
+// ─── Roadmap Section ───────────────────────────────────────────────────────
+
 const RoadmapSection: React.FC<{ section: ReportSection }> = ({ section }) => {
   const subs = section.subsections || [];
   if (subs.length === 0) return <GenericSection section={section} />;
@@ -152,7 +396,6 @@ const RoadmapSection: React.FC<{ section: ReportSection }> = ({ section }) => {
   return (
     <SectionWrapper section={section}>
       <div className="relative">
-        {/* Timeline line */}
         <div className="absolute left-6 top-0 bottom-0 w-0.5 bg-slate-200" />
         <div className="space-y-6">
           {subs.map((sub, i) => (
@@ -161,12 +404,11 @@ const RoadmapSection: React.FC<{ section: ReportSection }> = ({ section }) => {
                 {i + 1}
               </div>
               <div className={`flex-1 rounded-xl border-l-4 ${phaseColors[i % phaseColors.length]} p-5`}>
-                <h4 className="font-bold text-slate-900 text-sm mb-2">{sub.title}</h4>
+                <h4 className="font-bold text-slate-900 text-sm mb-2">{stripMarkdown(sub.title)}</h4>
                 <ul className="space-y-1.5">
                   {extractBullets(sub.content).map((b, j) => (
                     <li key={j} className="text-xs text-slate-600 flex items-start gap-1.5">
-                      <ArrowRight className="w-3 h-3 mt-0.5 text-slate-400 flex-shrink-0" />
-                      {b}
+                      <ArrowRight className="w-3 h-3 mt-0.5 text-slate-400 flex-shrink-0" />{b}
                     </li>
                   ))}
                 </ul>
@@ -180,13 +422,11 @@ const RoadmapSection: React.FC<{ section: ReportSection }> = ({ section }) => {
           ))}
         </div>
       </div>
-      {/* Extra content below subsections (like Total Investment) */}
-      {section.content.split('\n').filter(l => l.startsWith('**') && !l.startsWith('###')).map((line, i) => (
-        <p key={i} className="text-sm font-medium text-slate-700 mt-4">{line.replace(/\*\*/g, '')}</p>
-      ))}
     </SectionWrapper>
   );
 };
+
+// ─── Risk Section ──────────────────────────────────────────────────────────
 
 const RiskSection: React.FC<{ section: ReportSection }> = ({ section }) => {
   const table = parseMarkdownTable(section.content);
@@ -212,7 +452,7 @@ const RiskSection: React.FC<{ section: ReportSection }> = ({ section }) => {
         {table.rows.map((row, i) => (
           <div key={i} className={`rounded-xl border-l-4 p-5 ${severityColor(row[1] || '', row[2] || '')}`}>
             <div className="flex items-start justify-between mb-2">
-              <h4 className="font-bold text-slate-900 text-sm">{row[0]}</h4>
+              <h4 className="font-bold text-slate-900 text-sm">{stripMarkdown(row[0] || '')}</h4>
               <AlertTriangle className={`w-4 h-4 flex-shrink-0 ${/high/i.test(row[2] || '') ? 'text-rose-500' : 'text-amber-500'}`} />
             </div>
             <div className="flex gap-2 mb-3">
@@ -223,13 +463,15 @@ const RiskSection: React.FC<{ section: ReportSection }> = ({ section }) => {
                 {row[2] || 'N/A'} Impact
               </span>
             </div>
-            {row[3] && <p className="text-xs text-slate-600"><span className="font-semibold">Mitigation:</span> {row[3]}</p>}
+            {row[3] && <p className="text-xs text-slate-600"><span className="font-semibold">Mitigation:</span> {stripMarkdown(row[3])}</p>}
           </div>
         ))}
       </div>
     </SectionWrapper>
   );
 };
+
+// ─── Financial Section ─────────────────────────────────────────────────────
 
 const FinancialSection: React.FC<{ section: ReportSection }> = ({ section }) => {
   const table = parseMarkdownTable(section.content);
@@ -242,7 +484,7 @@ const FinancialSection: React.FC<{ section: ReportSection }> = ({ section }) => 
           <thead>
             <tr className="bg-gradient-to-r from-emerald-50 to-teal-50">
               {table.headers.map((h, i) => (
-                <th key={i} className="px-4 py-3 text-left text-xs font-bold text-slate-700 uppercase tracking-wider">{h}</th>
+                <th key={i} className="px-4 py-3 text-left text-xs font-bold text-slate-700 uppercase tracking-wider">{stripMarkdown(h)}</th>
               ))}
             </tr>
           </thead>
@@ -253,7 +495,7 @@ const FinancialSection: React.FC<{ section: ReportSection }> = ({ section }) => 
                 <tr key={i} className={`border-t border-slate-100 ${isTotal ? 'bg-emerald-50 font-bold' : 'hover:bg-slate-50'}`}>
                   {row.map((cell, j) => (
                     <td key={j} className={`px-4 py-3 text-xs ${j === 0 ? 'font-medium text-slate-900' : 'text-slate-600'} ${isTotal ? 'text-emerald-800' : ''}`}>
-                      {cell}
+                      {stripMarkdown(cell)}
                     </td>
                   ))}
                 </tr>
@@ -265,6 +507,8 @@ const FinancialSection: React.FC<{ section: ReportSection }> = ({ section }) => 
     </SectionWrapper>
   );
 };
+
+// ─── Journey Section ───────────────────────────────────────────────────────
 
 const JourneySection: React.FC<{ section: ReportSection }> = ({ section }) => {
   const subs = section.subsections || [];
@@ -288,7 +532,7 @@ const JourneySection: React.FC<{ section: ReportSection }> = ({ section }) => {
               {i < subs.length - 1 && <div className="w-0.5 h-8 bg-slate-200 mt-1" />}
             </div>
             <div className="bg-white rounded-xl border border-slate-200 p-4 flex-1">
-              <h4 className="font-bold text-slate-900 text-sm mb-2">{sub.title}</h4>
+              <h4 className="font-bold text-slate-900 text-sm mb-2">{stripMarkdown(sub.title)}</h4>
               <ul className="space-y-1">
                 {extractBullets(sub.content).map((b, j) => (
                   <li key={j} className="text-xs text-slate-600 flex items-start gap-1.5">
@@ -304,10 +548,11 @@ const JourneySection: React.FC<{ section: ReportSection }> = ({ section }) => {
   );
 };
 
+// ─── Architecture Section ──────────────────────────────────────────────────
+
 const ArchitectureSection: React.FC<{ section: ReportSection }> = ({ section }) => {
   const kvs = extractKeyValues(section.content);
   const bullets = extractBullets(section.content);
-  // Extract code blocks
   const codeMatch = section.content.match(/```[\s\S]*?```/);
   const codeContent = codeMatch ? codeMatch[0].replace(/```\w*\n?/g, '').trim() : '';
 
@@ -337,22 +582,29 @@ const ArchitectureSection: React.FC<{ section: ReportSection }> = ({ section }) 
           ))}
         </ul>
       )}
+      {kvs.length === 0 && bullets.length === 0 && !codeContent && (
+        <PlainContent content={section.content} />
+      )}
     </SectionWrapper>
   );
 };
 
-const TableSection: React.FC<{ section: ReportSection }> = ({ section }) => {
+// ─── Table Section ─────────────────────────────────────────────────────────
+
+const TableSection: React.FC<{ section: ReportSection; noHeader?: boolean }> = ({ section, noHeader }) => {
   const table = parseMarkdownTable(section.content);
   if (table.headers.length === 0) return <GenericSection section={section} />;
 
   return (
-    <SectionWrapper section={section}>
+    <SectionWrapper section={section} noHeader={noHeader}>
       <div className="overflow-x-auto rounded-xl border border-slate-200">
         <table className="w-full text-sm">
           <thead>
             <tr className="bg-slate-50">
               {table.headers.map((h, i) => (
-                <th key={i} className="px-4 py-3 text-left text-xs font-bold text-slate-600 uppercase tracking-wider border-b border-slate-200">{h}</th>
+                <th key={i} className="px-4 py-3 text-left text-xs font-bold text-slate-600 uppercase tracking-wider border-b border-slate-200">
+                  {stripMarkdown(h)}
+                </th>
               ))}
             </tr>
           </thead>
@@ -360,7 +612,9 @@ const TableSection: React.FC<{ section: ReportSection }> = ({ section }) => {
             {table.rows.map((row, i) => (
               <tr key={i} className="border-t border-slate-100 hover:bg-slate-50 transition-colors">
                 {row.map((cell, j) => (
-                  <td key={j} className={`px-4 py-3 text-xs ${j === 0 ? 'font-medium text-slate-900' : 'text-slate-600'}`}>{cell}</td>
+                  <td key={j} className={`px-4 py-3 text-xs ${j === 0 ? 'font-medium text-slate-900' : 'text-slate-600'}`}>
+                    {stripMarkdown(cell)}
+                  </td>
                 ))}
               </tr>
             ))}
@@ -371,8 +625,13 @@ const TableSection: React.FC<{ section: ReportSection }> = ({ section }) => {
   );
 };
 
+// ─── Appendix Section (collapsible) ───────────────────────────────────────
+
 const AppendixSection: React.FC<{ section: ReportSection }> = ({ section }) => {
   const [open, setOpen] = useState(false);
+  const table = parseMarkdownTable(section.content);
+  const bullets = extractBullets(section.content);
+
   return (
     <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
       <button
@@ -382,41 +641,100 @@ const AppendixSection: React.FC<{ section: ReportSection }> = ({ section }) => {
         <div className="bg-slate-100 p-2 rounded-lg">
           <BookOpen className="w-5 h-5 text-slate-600" />
         </div>
-        <h3 className="font-bold text-slate-900 flex-1">{section.title}</h3>
+        <h3 className="font-bold text-slate-900 flex-1">{stripMarkdown(section.title)}</h3>
         {open ? <ChevronDown className="w-5 h-5 text-slate-400" /> : <ChevronRight className="w-5 h-5 text-slate-400" />}
       </button>
       {open && (
-        <div className="px-6 pb-6 border-t border-slate-100 pt-4 overflow-hidden">
-          <div className="prose prose-sm prose-slate max-w-none break-words overflow-hidden prose-table:text-xs prose-th:bg-slate-50 prose-th:px-3 prose-th:py-2 prose-td:px-3 prose-td:py-2">
-            <ReactMarkdown>{section.content}</ReactMarkdown>
-          </div>
+        <div className="px-6 pb-6 border-t border-slate-100 pt-4 overflow-hidden space-y-4">
+          {table.headers.length > 0 ? (
+            <div className="overflow-x-auto rounded-xl border border-slate-200">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="bg-slate-50">
+                    {table.headers.map((h, i) => (
+                      <th key={i} className="px-3 py-2 text-left text-xs font-bold text-slate-600 uppercase tracking-wide border-b border-slate-200">
+                        {stripMarkdown(h)}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {table.rows.map((row, i) => (
+                    <tr key={i} className="border-t border-slate-100 hover:bg-slate-50">
+                      {row.map((cell, j) => (
+                        <td key={j} className={`px-3 py-2 text-xs ${j === 0 ? 'font-medium text-slate-900' : 'text-slate-600'}`}>
+                          {stripMarkdown(cell)}
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : bullets.length > 0 ? (
+            <ul className="space-y-2">
+              {bullets.map((b, i) => (
+                <li key={i} className="flex items-start gap-2 text-sm text-slate-700">
+                  <ArrowRight className="w-3 h-3 mt-1 text-slate-400 flex-shrink-0" />{b}
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <PlainContent content={section.content} />
+          )}
         </div>
       )}
     </div>
   );
 };
 
-// ─── Wrapper & Generic ─────────────────────────────────────────────────────
+// ─── Generic Section ───────────────────────────────────────────────────────
 
-const SectionWrapper: React.FC<{ section: ReportSection; children: React.ReactNode }> = ({ section, children }) => (
-  <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-    <div className={`bg-gradient-to-r ${SECTION_COLORS[section.type]} px-6 py-4 flex items-center gap-3`}>
-      <div className="bg-white/20 p-2 rounded-lg text-white flex-shrink-0">
-        {SECTION_ICONS[section.type]}
-      </div>
-      <h3 className="text-lg font-bold text-white break-words min-w-0">{section.title}</h3>
-    </div>
-    <div className="p-6 min-w-0 overflow-hidden">{children}</div>
-  </div>
-);
+const GenericSection: React.FC<{ section: ReportSection }> = ({ section }) => {
+  const table = parseMarkdownTable(section.content);
+  const bullets = extractBullets(section.content);
 
-const GenericSection: React.FC<{ section: ReportSection }> = ({ section }) => (
-  <SectionWrapper section={section}>
-    <div className="prose prose-sm prose-slate max-w-none break-words overflow-hidden prose-table:text-xs prose-th:bg-slate-50 prose-th:px-3 prose-th:py-2 prose-td:px-3 prose-td:py-2">
-      <ReactMarkdown>{section.content}</ReactMarkdown>
-    </div>
-  </SectionWrapper>
-);
+  return (
+    <SectionWrapper section={section}>
+      {table.headers.length > 0 ? (
+        <div className="overflow-x-auto rounded-xl border border-slate-200">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="bg-slate-50">
+                {table.headers.map((h, i) => (
+                  <th key={i} className="px-4 py-3 text-left text-xs font-bold text-slate-600 uppercase tracking-wider border-b border-slate-200">
+                    {stripMarkdown(h)}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {table.rows.map((row, i) => (
+                <tr key={i} className="border-t border-slate-100 hover:bg-slate-50 transition-colors">
+                  {row.map((cell, j) => (
+                    <td key={j} className={`px-4 py-3 text-xs ${j === 0 ? 'font-medium text-slate-900' : 'text-slate-600'}`}>
+                      {stripMarkdown(cell)}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : bullets.length > 0 ? (
+        <ul className="space-y-2">
+          {bullets.map((b, i) => (
+            <li key={i} className="flex items-start gap-2 text-sm text-slate-700">
+              <ArrowRight className="w-3 h-3 mt-1 text-slate-400 flex-shrink-0" />{b}
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <PlainContent content={section.content} />
+      )}
+    </SectionWrapper>
+  );
+};
 
 // ─── Section Router ────────────────────────────────────────────────────────
 
@@ -430,19 +748,21 @@ const SectionRenderer: React.FC<{ section: ReportSection }> = ({ section }) => {
     case 'financial': return <FinancialSection section={section} />;
     case 'roadmap': return <RoadmapSection section={section} />;
     case 'risks': return <RiskSection section={section} />;
+    case 'swot': return <SwotSection section={section} />;
+    case 'porters': return <PortersSection section={section} />;
     case 'impact': return <KPISection section={section} />;
-    case 'recommendations': return <KPISection section={section} />;
+    case 'recommendations': return <RecommendationsSection section={section} />;
     case 'appendix': return <AppendixSection section={section} />;
-    case 'swot':
-    case 'porters':
     case 'systems':
+      // Slide 12 "Capability-to-System Mapping" — no title header
+      return <TableSection section={section} noHeader={/capability.*system/i.test(section.title)} />;
     case 'requirements':
       return <TableSection section={section} />;
     default: return <GenericSection section={section} />;
   }
 };
 
-// ─── Main Report Dashboard ────────────────────────────────────────────────
+// ─── Main Report Dashboard ─────────────────────────────────────────────────
 
 interface ReportDashboardProps {
   markdown: string;
@@ -453,7 +773,12 @@ export const ReportDashboard: React.FC<ReportDashboardProps> = ({ markdown }) =>
   const [activeSection, setActiveSection] = useState<string>('');
   const sectionRefs = useRef<Record<string, HTMLDivElement | null>>({});
 
-  // Scroll to section on TOC click
+  useEffect(() => {
+    if (report.sections.length > 0 && !activeSection) {
+      setActiveSection(report.sections[0].id);
+    }
+  }, [report.sections]);
+
   const scrollToSection = (id: string) => {
     const el = sectionRefs.current[id];
     if (el) {
@@ -462,63 +787,42 @@ export const ReportDashboard: React.FC<ReportDashboardProps> = ({ markdown }) =>
     }
   };
 
-  // Track active section on scroll
   useEffect(() => {
     const observer = new IntersectionObserver(
       (entries) => {
         for (const entry of entries) {
-          if (entry.isIntersecting) {
-            setActiveSection(entry.target.id);
-          }
+          if (entry.isIntersecting) setActiveSection(entry.target.id);
         }
       },
-      { rootMargin: '-100px 0px -60% 0px' }
+      { rootMargin: '-80px 0px -60% 0px' }
     );
-
-    Object.values(sectionRefs.current).forEach(el => {
-      if (el) observer.observe(el);
-    });
-
+    Object.values(sectionRefs.current).forEach(el => { if (el) observer.observe(el); });
     return () => observer.disconnect();
   }, [report.sections]);
 
   if (report.sections.length === 0) {
-    return (
-      <div className="prose prose-slate max-w-none">
-        <ReactMarkdown>{markdown}</ReactMarkdown>
-      </div>
-    );
+    return <PlainContent content={markdown} />;
   }
 
   return (
-    <div className="space-y-6 min-w-0 overflow-hidden">
-      {/* Report title */}
-      <div className="text-center">
-        <h1 className="text-2xl font-bold text-slate-900">{report.title}</h1>
-        <p className="text-sm text-slate-400 mt-1">{report.sections.length} sections generated</p>
-      </div>
-
-      {/* Step indicator — wrapping nav pills */}
-      <div className="sticky top-0 z-10 bg-white/90 backdrop-blur-sm border-b border-slate-100 -mx-2 px-2 py-2">
-        <div className="flex flex-wrap items-center gap-1.5 md:gap-2">
-          {report.sections.map((s, i) => (
-            <button
-              key={s.id}
-              onClick={() => scrollToSection(s.id)}
-              className={`flex items-center gap-1.5 px-2.5 md:px-4 py-1.5 md:py-2 rounded-full text-[11px] md:text-xs font-semibold transition-all ${
-                activeSection === s.id
-                  ? 'bg-accent-600 text-white shadow-md'
-                  : 'bg-slate-100 text-slate-500 hover:bg-slate-200 hover:text-slate-700'
-              }`}
-            >
-              <span className="opacity-80 hidden sm:block">{SECTION_ICONS[s.type]}</span>
-              <span className="truncate">{s.title}</span>
-            </button>
+    <div className="space-y-5 min-w-0 overflow-hidden">
+      {/* Compact section dropdown nav */}
+      <div className="sticky top-0 z-10 bg-white/95 backdrop-blur-sm border border-slate-200 rounded-xl shadow-sm px-4 py-2.5 flex items-center gap-3">
+        <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider flex-shrink-0">Jump to</span>
+        <select
+          title="Jump to section"
+          value={activeSection}
+          onChange={(e) => scrollToSection(e.target.value)}
+          className="flex-1 text-sm font-medium border border-slate-200 rounded-lg px-3 py-1.5 bg-white text-slate-800 focus:outline-none focus:ring-2 focus:ring-accent-400 cursor-pointer"
+        >
+          {report.sections.map((s) => (
+            <option key={s.id} value={s.id}>{s.title}</option>
           ))}
-        </div>
+        </select>
+        <span className="text-[10px] text-slate-400 flex-shrink-0 hidden sm:block">{report.sections.length} sections</span>
       </div>
 
-      {/* Sections — full width */}
+      {/* Sections */}
       {report.sections.map((section) => (
         <div
           key={section.id}

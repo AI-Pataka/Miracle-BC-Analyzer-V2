@@ -195,8 +195,17 @@ def capability_node(state: AnalyzerState) -> dict:
 
         # Second pass: generate final output with tool results
         followup_prompt = (
-            f"Based on the following tool results, generate the final Slides 3, 4, "
-            f"and Appendix A output.\n\nTool Results:\n"
+            f"Based on the following knowledge base search results, generate the final "
+            f"Slides 3, 4, and Appendix A output.\n\n"
+            f"CRITICAL RULES:\n"
+            f"- For each capability: if the search returned 'MATCH FOUND', use the matched "
+            f"name exactly and do NOT add '(New)'.\n"
+            f"- If the search returned 'NO MATCH', you MUST mark that capability with the "
+            f"exact string '(New)' appended to the L4 Capability name in Slide 4.\n"
+            f"- In Appendix A, for EVERY capability list: (1) the KB search query used, "
+            f"(2) whether a match was found ('KB: MATCH' or 'KB: NO MATCH'), and "
+            f"(3) the rationale. This evidence is required for QA validation.\n\n"
+            f"KB Search Results:\n"
             + "\n".join(tool_results)
             + f"\n\nOriginal input:\n{state['input_text']}"
         )
@@ -497,6 +506,166 @@ graph = build_graph()
 # ══════════════════════════════════════════════════════════════════════
 # EXECUTION HELPERS
 # ══════════════════════════════════════════════════════════════════════
+
+
+async def run_full_pipeline_streaming(
+    input_text: str,
+    user_id: str,
+    core_assumptions: str,
+    max_retries: int = 2,
+):
+    """
+    Async generator that runs the full pipeline and yields SSE-ready event dicts
+    as each stage completes. Designed to be consumed by a StreamingResponse.
+
+    Events emitted:
+      {"type": "stage_start", "stage": str, "label": str, "attempt": int}
+      {"type": "stage_done",  "stage": str, "label": str, "duration_ms": int}
+      {"type": "qa_retry",    "attempt": int, "feedback": str}
+      {"type": "complete",    "qa_pass": bool, "qa_feedback": str,
+                              "attempts": int, "final_output": str}
+      {"type": "error",       "detail": str}
+    """
+    import asyncio
+    from app.agents.qa_agent import run_qa_validation
+
+    run_id = generate_run_id()
+    agent_logger.info(f"[{run_id}] === STREAMING PIPELINE (user={user_id}) ===")
+
+    STAGES = [
+        ("context",    "Market Context & KPIs"),
+        ("capability", "Capability Design"),
+        ("journey",    "Journey Mapping"),
+        ("systems",    "Architecture & Systems"),
+        ("financial",  "Financial Analysis"),
+        ("merge",      "Compiling Report"),
+        ("qa",         "QA Validation"),
+    ]
+
+    state = {
+        "input_text": input_text,
+        "user_id": user_id,
+        "core_assumptions": core_assumptions,
+        "validation_status": "approved",
+        "context_output": "",
+        "capability_output": "",
+        "journey_output": "",
+        "systems_output": "",
+        "financial_output": "",
+        "qa_feedback": "",
+        "qa_pass": False,
+        "final_output": "",
+        "_run_id": run_id,
+    }
+
+    try:
+        for attempt in range(max_retries + 1):
+            agent_logger.info(f"[{run_id}] Attempt {attempt + 1}/{max_retries + 1}")
+
+            # ── Context ──────────────────────────────────────────────
+            t0 = int(time.time() * 1000)
+            yield {"type": "stage_start", "stage": "context", "label": "Market Context & KPIs", "attempt": attempt + 1}
+            await asyncio.sleep(0)  # flush event to client before blocking call
+            result = await asyncio.to_thread(context_node, state)
+            state.update(result)
+            yield {"type": "stage_done", "stage": "context", "label": "Market Context & KPIs", "duration_ms": int(time.time() * 1000) - t0}
+            await asyncio.sleep(0)
+
+            # ── Capability ───────────────────────────────────────────
+            t0 = int(time.time() * 1000)
+            yield {"type": "stage_start", "stage": "capability", "label": "Capability Design", "attempt": attempt + 1}
+            await asyncio.sleep(0)
+            result = await asyncio.to_thread(capability_node, state)
+            state.update(result)
+            yield {"type": "stage_done", "stage": "capability", "label": "Capability Design", "duration_ms": int(time.time() * 1000) - t0}
+            await asyncio.sleep(0)
+
+            # Update state snapshot for dependent agents
+            updated = dict(state)
+
+            # ── Journey ──────────────────────────────────────────────
+            t0 = int(time.time() * 1000)
+            yield {"type": "stage_start", "stage": "journey", "label": "Journey Mapping", "attempt": attempt + 1}
+            await asyncio.sleep(0)
+            result = await asyncio.to_thread(journey_node, updated)
+            state.update(result)
+            updated = dict(state)
+            yield {"type": "stage_done", "stage": "journey", "label": "Journey Mapping", "duration_ms": int(time.time() * 1000) - t0}
+            await asyncio.sleep(0)
+
+            # ── Systems ──────────────────────────────────────────────
+            t0 = int(time.time() * 1000)
+            yield {"type": "stage_start", "stage": "systems", "label": "Architecture & Systems", "attempt": attempt + 1}
+            await asyncio.sleep(0)
+            result = await asyncio.to_thread(systems_node, updated)
+            state.update(result)
+            updated = dict(state)
+            yield {"type": "stage_done", "stage": "systems", "label": "Architecture & Systems", "duration_ms": int(time.time() * 1000) - t0}
+            await asyncio.sleep(0)
+
+            # ── Financial ────────────────────────────────────────────
+            t0 = int(time.time() * 1000)
+            yield {"type": "stage_start", "stage": "financial", "label": "Financial Analysis", "attempt": attempt + 1}
+            await asyncio.sleep(0)
+            result = await asyncio.to_thread(financial_node, updated)
+            state.update(result)
+            yield {"type": "stage_done", "stage": "financial", "label": "Financial Analysis", "duration_ms": int(time.time() * 1000) - t0}
+            await asyncio.sleep(0)
+
+            # ── Merge ────────────────────────────────────────────────
+            t0 = int(time.time() * 1000)
+            yield {"type": "stage_start", "stage": "merge", "label": "Compiling Report", "attempt": attempt + 1}
+            await asyncio.sleep(0)
+            result = await asyncio.to_thread(merge_node, state)
+            state.update(result)
+            yield {"type": "stage_done", "stage": "merge", "label": "Compiling Report", "duration_ms": int(time.time() * 1000) - t0}
+            await asyncio.sleep(0)
+
+            # ── QA ───────────────────────────────────────────────────
+            t0 = int(time.time() * 1000)
+            yield {"type": "stage_start", "stage": "qa", "label": "QA Validation", "attempt": attempt + 1}
+            await asyncio.sleep(0)
+            qa_result = await asyncio.to_thread(run_qa_validation, state["final_output"])
+            yield {"type": "stage_done", "stage": "qa", "label": "QA Validation", "duration_ms": int(time.time() * 1000) - t0}
+            await asyncio.sleep(0)
+
+            if qa_result["qa_pass"]:
+                agent_logger.info(f"[{run_id}] QA PASSED on attempt {attempt + 1}")
+                yield {
+                    "type": "complete",
+                    "qa_pass": True,
+                    "qa_feedback": "",
+                    "attempts": attempt + 1,
+                    "final_output": state["final_output"],
+                }
+                return
+            else:
+                agent_logger.warning(f"[{run_id}] QA FAILED on attempt {attempt + 1}")
+                state["qa_feedback"] = qa_result["qa_feedback"]
+                if attempt < max_retries:
+                    yield {
+                        "type": "qa_retry",
+                        "attempt": attempt + 1,
+                        "feedback": qa_result["qa_feedback"][:300],
+                    }
+                    state["input_text"] = (
+                        input_text
+                        + f"\n\n--- QA CORRECTION REQUIRED (Attempt {attempt + 2}) ---\n"
+                        + qa_result["qa_feedback"]
+                        + "\nFix the above violations in your output."
+                    )
+
+        # All retries exhausted
+        yield {
+            "type": "complete",
+            "qa_pass": False,
+            "qa_feedback": state["qa_feedback"],
+            "attempts": max_retries + 1,
+            "final_output": state["final_output"],
+        }
+    except Exception as e:
+        agent_logger.error(f"[{run_id}] Streaming pipeline error: {e}")
+        yield {"type": "error", "detail": str(e)}
 
 
 async def run_master_extraction(input_text: str, user_id: str) -> dict:

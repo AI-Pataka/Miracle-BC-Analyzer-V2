@@ -7,6 +7,8 @@ import os
 import ssl
 import json
 import httpx
+import urllib3
+import requests
 import firebase_admin
 from firebase_admin import credentials, auth as firebase_auth
 from dotenv import load_dotenv
@@ -15,8 +17,24 @@ from google.auth.transport.requests import Request
 
 load_dotenv()
 
+# ── SSL bypass (dev/corporate-proxy environments) ──────────────────────────
+# The Firebase Admin SDK verifies tokens by fetching Google's public keys via
+# the `requests` library. On machines with corporate proxies or missing root
+# CAs, this fails with SSLCertVerificationError.  We disable SSL verification
+# globally for requests/urllib3 here (development only).
 os.environ["PYTHONHTTPSVERIFY"] = "0"
 ssl._create_default_https_context = ssl._create_unverified_context
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+# Patch requests.Session so every request (including firebase_admin's internal
+# calls to googleapis.com) skips SSL certificate verification.
+_original_request = requests.Session.request
+
+def _no_verify_request(self, method, url, **kwargs):
+    kwargs.setdefault("verify", False)
+    return _original_request(self, method, url, **kwargs)
+
+requests.Session.request = _no_verify_request
 
 _firebase_app = None
 _credentials = None
@@ -26,6 +44,13 @@ def get_firebase_app():
     global _firebase_app
     if _firebase_app is None:
         service_account_path = os.getenv("FIREBASE_SERVICE_ACCOUNT_PATH", "./firebase-service-account.json")
+        if not os.path.exists(service_account_path):
+            raise FileNotFoundError(
+                f"Firebase service account file not found at: '{service_account_path}'. "
+                "Download it from Firebase Console → Project Settings → Service Accounts → "
+                "Generate new private key, and place it in the backend/ directory as "
+                "'firebase-service-account.json'."
+            )
         cred = credentials.Certificate(service_account_path)
         _firebase_app = firebase_admin.initialize_app(cred)
     return _firebase_app

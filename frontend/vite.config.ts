@@ -19,6 +19,12 @@ export default defineConfig(({mode}) => {
       // HMR is disabled in AI Studio via DISABLE_HMR env var.
       hmr: process.env.DISABLE_HMR !== 'true',
       proxy: {
+        // SSE streaming endpoint — listed BEFORE the generic /api rule so it
+        // matches first. No timeout so the long-lived connection is never cut.
+        '/api/approve/stream': {
+          target: 'http://localhost:8000',
+          changeOrigin: true,
+        },
         '/api': {
           target: 'http://localhost:8000',
           changeOrigin: true,

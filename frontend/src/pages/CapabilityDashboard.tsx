@@ -41,6 +41,7 @@ interface CapabilityRecord {
   systems: string[];
   owner: string;
   company: string;
+  industry?: string;
   hasIt: boolean;
   availability: AvailabilityLevel;
 }
@@ -436,9 +437,11 @@ const NewCapabilityRow: React.FC<NewRowProps> = ({ initial, onSave, onCancel }) 
 // ─── Main Dashboard ───────────────────────────────────────────────────────────
 
 export const CapabilityDashboard: React.FC = () => {
-  const { getIdToken } = useAuth();
+  const { getIdToken, profile } = useAuth();
   const [records, setRecords]             = useState<CapabilityRecord[]>(SEED_DATA);
   const [search, setSearch]               = useState('');
+  const [industryFilter, setIndustryFilter] = useState('');
+  const [companyFilter, setCompanyFilter] = useState('');
   const [collapsedL1s, setCollapsedL1s]   = useState<Set<string>>(new Set());
   const [editingCell, setEditingCell]     = useState<{ id: string; field: keyof CapabilityRecord } | null>(null);
   const [expandedDesc, setExpandedDesc]   = useState<Set<string>>(new Set());
@@ -450,6 +453,14 @@ export const CapabilityDashboard: React.FC = () => {
   const [saving, setSaving]               = useState(false);
   const [loading, setLoading]             = useState(true);
   const fileInputRef                      = useRef<HTMLInputElement>(null);
+
+  // ── Sync industry / company filter from user profile ──
+
+  useEffect(() => {
+    if (profile?.industry && !industryFilter) setIndustryFilter(profile.industry);
+    if (profile?.client_company && !companyFilter) setCompanyFilter(profile.client_company);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [profile]);
 
   // ── Fetch from backend on mount ──
 
@@ -472,6 +483,7 @@ export const CapabilityDashboard: React.FC = () => {
               systems: c.systems || [],
               owner: c.owner || '',
               company: c.company || '',
+              industry: c.industry || '',
               hasIt: c.hasIt ?? c.has_it ?? false,
               availability: c.availability || c.maturity_level || '',
             }));
@@ -510,10 +522,31 @@ export const CapabilityDashboard: React.FC = () => {
 
   // ── Derived ──
 
+  const availableIndustries = useMemo(() => {
+    const s = new Set<string>();
+    records.forEach(r => { if (r.industry) s.add(r.industry); });
+    return Array.from(s).sort();
+  }, [records]);
+
+  const availableCompanies = useMemo(() => {
+    const s = new Set<string>();
+    records.forEach(r => { if (r.company) s.add(r.company); });
+    return Array.from(s).sort();
+  }, [records]);
+
   const filteredRecords = useMemo(() => {
-    if (!search.trim()) return records;
+    let base = records;
+    // Industry filter: only exclude records that ARE tagged with a DIFFERENT industry
+    if (industryFilter) {
+      base = base.filter(r => !r.industry || r.industry === industryFilter);
+    }
+    // Company filter: only exclude records that ARE tagged with a DIFFERENT company
+    if (companyFilter) {
+      base = base.filter(r => !r.company || r.company === companyFilter);
+    }
+    if (!search.trim()) return base;
     const q = search.toLowerCase();
-    return records.filter(r =>
+    return base.filter(r =>
       r.l1.toLowerCase().includes(q) ||
       r.l2.toLowerCase().includes(q) ||
       r.l3.toLowerCase().includes(q) ||
@@ -522,7 +555,7 @@ export const CapabilityDashboard: React.FC = () => {
       r.systems.some(s => s.toLowerCase().includes(q)) ||
       r.owner.toLowerCase().includes(q),
     );
-  }, [records, search]);
+  }, [records, search, industryFilter, companyFilter]);
 
   const groupedRecords = useMemo(() => {
     const map = new Map<string, CapabilityRecord[]>();
@@ -567,7 +600,7 @@ export const CapabilityDashboard: React.FC = () => {
     const id = generateId(records);
     setRecords(prev => [
       ...prev,
-      { id, l1: '', l2: '', l3: '', l4: '', description: '', aiCategory: 'TBD', systems: [], owner: '', company: '', hasIt: false, availability: '', ...partial },
+      { id, l1: '', l2: '', l3: '', l4: '', description: '', aiCategory: 'TBD', systems: [], owner: '', company: '', industry: '', hasIt: false, availability: '', ...partial },
     ]);
     setExpandedDesc(prev => new Set(prev).add(id));
     setAddingNew(null);
@@ -615,6 +648,7 @@ export const CapabilityDashboard: React.FC = () => {
           systems:     header.findIndex(h => h.includes('system') || h.includes('tech')),
           owner:       header.indexOf('owner'),
           company:     header.indexOf('company'),
+          industry:    header.indexOf('industry'),
           maturity:    header.findIndex(h => h.includes('availability') || h.includes('maturity')),
         };
 
@@ -652,6 +686,7 @@ export const CapabilityDashboard: React.FC = () => {
             systems,
             owner:       idx.owner >= 0 ? (cols[idx.owner] ?? '') : '',
             company:     idx.company >= 0 ? (cols[idx.company] ?? '') : '',
+            industry:    idx.industry >= 0 ? (cols[idx.industry] ?? '') : '',
             hasIt:       false,
             availability: idx.maturity >= 0 ? (cols[idx.maturity] ?? '') as AvailabilityLevel : '',
           };
@@ -686,9 +721,9 @@ export const CapabilityDashboard: React.FC = () => {
   };
 
   const handleExportCSV = () => {
-    const header = 'l1,l2,l3,l4,description,aiCategory,systems,owner,company,hasIt,availability';
+    const header = 'l1,l2,l3,l4,description,aiCategory,systems,owner,company,industry,hasIt,availability';
     const rows = records.map(r =>
-      [r.l1, r.l2, r.l3, r.l4, r.description, r.aiCategory, r.systems.join(';'), r.owner, r.company, r.hasIt ? 'Yes' : 'No', r.availability]
+      [r.l1, r.l2, r.l3, r.l4, r.description, r.aiCategory, r.systems.join(';'), r.owner, r.company, r.industry || '', r.hasIt ? 'Yes' : 'No', r.availability]
         .map(v => '"' + String(v).replace(/"/g, '""') + '"').join(','),
     );
     const blob = new Blob([[header, ...rows].join('\n')], { type: 'text/csv' });
@@ -915,6 +950,48 @@ export const CapabilityDashboard: React.FC = () => {
             </div>
           </div>
         </div>
+
+        {/* ── Industry / Company Filters ───────────────────────────────────── */}
+        {(availableIndustries.length > 0 || availableCompanies.length > 0) && (
+          <div className="flex items-start gap-6 mb-4 flex-wrap bg-white border border-slate-200 rounded-xl px-4 py-3 shadow-sm">
+            {availableIndustries.length > 0 && (
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest whitespace-nowrap">Industry</span>
+                <button
+                  onClick={() => setIndustryFilter('')}
+                  className={cn('text-xs px-2.5 py-1 rounded-full font-medium border transition-colors',
+                    !industryFilter ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-slate-500 border-slate-200 hover:bg-slate-50')}
+                >All</button>
+                {availableIndustries.map(ind => (
+                  <button
+                    key={ind}
+                    onClick={() => setIndustryFilter(industryFilter === ind ? '' : ind)}
+                    className={cn('text-xs px-2.5 py-1 rounded-full font-medium border transition-colors',
+                      industryFilter === ind ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-slate-500 border-slate-200 hover:bg-slate-50')}
+                  >{ind}</button>
+                ))}
+              </div>
+            )}
+            {availableCompanies.length > 0 && (
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest whitespace-nowrap">Company</span>
+                <button
+                  onClick={() => setCompanyFilter('')}
+                  className={cn('text-xs px-2.5 py-1 rounded-full font-medium border transition-colors',
+                    !companyFilter ? 'bg-sky-600 text-white border-sky-600' : 'bg-white text-slate-500 border-slate-200 hover:bg-slate-50')}
+                >All</button>
+                {availableCompanies.map(co => (
+                  <button
+                    key={co}
+                    onClick={() => setCompanyFilter(companyFilter === co ? '' : co)}
+                    className={cn('text-xs px-2.5 py-1 rounded-full font-medium border transition-colors',
+                      companyFilter === co ? 'bg-sky-600 text-white border-sky-600' : 'bg-white text-slate-500 border-slate-200 hover:bg-slate-50')}
+                  >{co}</button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
 
         {/* ── Search + Toolbar ─────────────────────────────────────────────── */}
         <div className="flex items-center gap-3 mb-4 flex-wrap">

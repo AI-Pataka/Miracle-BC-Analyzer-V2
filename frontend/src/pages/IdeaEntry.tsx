@@ -1,8 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Zap, CheckCircle2, XCircle, AlertCircle,
-  RotateCcw, FileText, Building2, Briefcase, Globe, ChevronRight, Upload,
+  RotateCcw, Building2, Briefcase, Globe, ChevronRight, Upload,
   Pencil, Trash2, RefreshCw, Sparkles, ShieldCheck, History,
+  BarChart3, Layers, Route, Server, DollarSign, GitMerge, ShieldQuestion, Loader2,
 } from 'lucide-react';
 import { Layout } from '../components/Layout';
 import { ReportDashboard } from '../components/ReportDashboard';
@@ -88,9 +89,9 @@ export const IdeaEntry: React.FC = () => {
   const fileInputRef = React.useRef<HTMLInputElement>(null);
 
   // Form state
-  const [industry, setIndustry] = useState('Telecommunications');
+  const [industry, setIndustry] = useState('');
   const [consultingCompany, setConsultingCompany] = useState('');
-  const [clientCompany, setClientCompany] = useState('Verizon');
+  const [clientCompany, setClientCompany] = useState('');
   const [problemStatement, setProblemStatement] = useState('');
   const [uploadedFileName, setUploadedFileName] = useState<string | null>(null);
 
@@ -102,6 +103,37 @@ export const IdeaEntry: React.FC = () => {
   const [qaFeedback, setQaFeedback] = useState('');
   const [attempts, setAttempts] = useState(0);
   const [error, setError] = useState<string | null>(null);
+
+  // Streaming pipeline progress
+  type StageStatus = 'pending' | 'running' | 'done' | 'error';
+  interface PipelineStage {
+    stage: string;
+    label: string;
+    status: StageStatus;
+    startedAt?: number;
+    duration?: number;
+    attempt?: number;
+  }
+  const PIPELINE_STAGE_DEFS: PipelineStage[] = [
+    { stage: 'context',    label: 'Market Context & KPIs',   status: 'pending' },
+    { stage: 'capability', label: 'Capability Design',        status: 'pending' },
+    { stage: 'journey',    label: 'Journey Mapping',          status: 'pending' },
+    { stage: 'systems',    label: 'Architecture & Systems',   status: 'pending' },
+    { stage: 'financial',  label: 'Financial Analysis',       status: 'pending' },
+    { stage: 'merge',      label: 'Compiling Report',         status: 'pending' },
+    { stage: 'qa',         label: 'QA Validation',            status: 'pending' },
+  ];
+  const STAGE_ICONS: Record<string, React.ReactNode> = {
+    context:    <BarChart3 className="w-4 h-4" />,
+    capability: <Layers className="w-4 h-4" />,
+    journey:    <Route className="w-4 h-4" />,
+    systems:    <Server className="w-4 h-4" />,
+    financial:  <DollarSign className="w-4 h-4" />,
+    merge:      <GitMerge className="w-4 h-4" />,
+    qa:         <ShieldQuestion className="w-4 h-4" />,
+  };
+  const [pipelineStages, setPipelineStages] = useState<PipelineStage[]>(PIPELINE_STAGE_DEFS);
+  const readerRef = useRef<ReadableStreamDefaultReader<Uint8Array> | null>(null);
 
   // Pre-populate from user profile
   useEffect(() => {
@@ -168,16 +200,17 @@ export const IdeaEntry: React.FC = () => {
     }
   };
 
-  // ─── Step 2: POST /api/approve ───────────────────────────────────────
+  // ─── Step 2: POST /api/approve/stream ────────────────────────────────
 
   const handleApprove = async () => {
     setPhase('generating');
     setError(null);
+    setPipelineStages(PIPELINE_STAGE_DEFS);
     try {
       const token = await getIdToken();
       if (!token) throw new Error('Not authenticated. Please log in again.');
 
-      const res = await fetch('/api/approve', {
+      const res = await fetch('/api/approve/stream', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -195,14 +228,73 @@ export const IdeaEntry: React.FC = () => {
         throw new Error(errData.detail || `Pipeline failed (${res.status})`);
       }
 
-      const data = await res.json();
-      setFinalOutput(data.final_output);
-      setQaPass(data.qa_pass);
-      setQaFeedback(data.qa_feedback || '');
-      setAttempts(data.attempts || 1);
-      setPhase('result');
+      if (!res.body) throw new Error('No response body from server.');
+
+      const reader = res.body.getReader();
+      readerRef.current = reader;
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+
+        // Parse complete SSE lines from the buffer
+        const lines = buffer.split('\n');
+        buffer = lines.pop() ?? ''; // keep incomplete last chunk
+
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue;
+          let event: any;
+          try { event = JSON.parse(line.slice(6)); } catch { continue; }
+
+          if (event.type === 'stage_start') {
+            setPipelineStages(prev => prev.map(s =>
+              s.stage === event.stage
+                ? { ...s, status: 'running', startedAt: Date.now(), attempt: event.attempt }
+                : s
+            ));
+            // Yield to React so the "running" state is rendered before the next event
+            await new Promise(r => setTimeout(r, 0));
+          } else if (event.type === 'stage_done') {
+            setPipelineStages(prev => prev.map(s =>
+              s.stage === event.stage
+                ? { ...s, status: 'done', duration: event.duration_ms }
+                : s
+            ));
+            await new Promise(r => setTimeout(r, 0));
+          } else if (event.type === 'qa_retry') {
+            // Reset all stages for retry
+            setPipelineStages(PIPELINE_STAGE_DEFS);
+            await new Promise(r => setTimeout(r, 0));
+          } else if (event.type === 'complete') {
+            setFinalOutput(event.final_output);
+            setQaPass(event.qa_pass);
+            setQaFeedback(event.qa_feedback || '');
+            setAttempts(event.attempts || 1);
+            setPhase('result');
+          } else if (event.type === 'error') {
+            throw new Error(event.detail);
+          }
+        }
+      }
     } catch (err: any) {
-      setError(err.message || 'Pipeline execution failed.');
+      // "Failed to fetch" is the browser's generic message when it can't reach the server at all.
+      // Translate it into something actionable for the user.
+      const raw: string = err?.message || '';
+      let message = raw;
+      if (
+        raw === 'Failed to fetch' ||
+        raw.toLowerCase().includes('networkerror') ||
+        raw.toLowerCase().includes('load failed')
+      ) {
+        message =
+          'Cannot connect to the analysis server. ' +
+          'Please make sure the backend is running (uvicorn main:app --reload) ' +
+          'and try again.';
+      }
+      setError(message || 'Pipeline execution failed.');
       setPhase('error');
     }
   };
@@ -213,6 +305,7 @@ export const IdeaEntry: React.FC = () => {
   };
 
   const handleReset = () => {
+    readerRef.current?.cancel();
     setPhase('input');
     setCoreAssumptions('');
     setFinalOutput('');
@@ -221,6 +314,7 @@ export const IdeaEntry: React.FC = () => {
     setAttempts(0);
     setError(null);
     setUploadedFileName(null);
+    setPipelineStages(PIPELINE_STAGE_DEFS);
   };
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -270,20 +364,180 @@ export const IdeaEntry: React.FC = () => {
     </div>
   );
 
-  const renderError = () => (
-    <div className="bg-white rounded-2xl border border-rose-200 shadow-sm p-8 text-center">
-      <AlertCircle className="w-12 h-12 text-rose-400 mx-auto mb-4" />
-      <h3 className="text-lg font-bold text-slate-900 mb-2">Something went wrong</h3>
-      <p className="text-sm text-slate-500 mb-6 max-w-md mx-auto">{error}</p>
-      <button
-        onClick={() => setPhase('input')}
-        className="inline-flex items-center gap-2 bg-accent-600 text-white font-semibold py-2.5 px-5 rounded-xl hover:bg-accent-700 transition-colors"
-      >
-        <RotateCcw className="w-4 h-4" />
-        Try Again
-      </button>
-    </div>
-  );
+  const renderGeneratingPhase = () => {
+    const doneCount = pipelineStages.filter(s => s.status === 'done').length;
+    const total = pipelineStages.length;
+    const progressPct = Math.round((doneCount / total) * 100);
+
+    const statusColors: Record<string, string> = {
+      pending: 'bg-slate-100 border-slate-200 text-slate-400',
+      running: 'bg-accent-50 border-accent-300 text-accent-600',
+      done:    'bg-emerald-50 border-emerald-200 text-emerald-700',
+      error:   'bg-rose-50 border-rose-200 text-rose-600',
+    };
+    const iconBg: Record<string, string> = {
+      pending: 'bg-slate-200 text-slate-400',
+      running: 'bg-accent-500 text-white',
+      done:    'bg-emerald-500 text-white',
+      error:   'bg-rose-500 text-white',
+    };
+
+    const formatDuration = (ms?: number) => {
+      if (!ms) return '';
+      if (ms < 1000) return `${ms}ms`;
+      return `${(ms / 1000).toFixed(1)}s`;
+    };
+
+    return (
+      <div className="max-w-2xl mx-auto py-8 space-y-6">
+        {/* Header */}
+        <div className="text-center space-y-1">
+          <div className="inline-flex items-center gap-2 text-xs font-bold uppercase tracking-widest text-accent-600 mb-2">
+            <Loader2 className="w-4 h-4 animate-spin" />
+            Intelligence Engine Running
+          </div>
+          <h2 className="text-2xl font-extrabold text-slate-900">Analyzing Your Opportunity</h2>
+          <p className="text-sm text-slate-500">Specialized agents are building your report section by section</p>
+        </div>
+
+        {/* Progress bar */}
+        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm px-6 py-5">
+          <div className="flex items-center justify-between mb-3">
+            <span className="text-xs font-semibold text-slate-600 uppercase tracking-wider">Overall Progress</span>
+            <span className="text-sm font-bold text-slate-900">{doneCount} / {total} stages</span>
+          </div>
+          <div className="h-2.5 bg-slate-100 rounded-full overflow-hidden">
+            <div
+              className="h-full bg-gradient-to-r from-accent-500 to-emerald-500 rounded-full transition-all duration-700 ease-out"
+              style={{ width: `${progressPct}%` }}
+            />
+          </div>
+          <p className="text-xs text-slate-400 mt-2">
+            {doneCount === 0 ? 'Starting up agents...' :
+             doneCount === total ? 'Finalizing...' :
+             `${pipelineStages.find(s => s.status === 'running')?.label ?? 'Processing'}...`}
+          </p>
+        </div>
+
+        {/* Stage cards */}
+        <div className="space-y-2">
+          {pipelineStages.map((s, i) => (
+            <div
+              key={s.stage}
+              className={cn(
+                'flex items-center gap-4 rounded-xl border px-5 py-3.5 transition-all duration-300',
+                statusColors[s.status],
+              )}
+            >
+              {/* Stage number / icon */}
+              <div className={cn(
+                'w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 text-sm font-bold transition-all duration-300',
+                iconBg[s.status],
+              )}>
+                {s.status === 'done'    ? <CheckCircle2 className="w-4 h-4" /> :
+                 s.status === 'running' ? <Loader2 className="w-4 h-4 animate-spin" /> :
+                 s.status === 'error'   ? <XCircle className="w-4 h-4" /> :
+                 <span className="text-xs">{i + 1}</span>}
+              </div>
+
+              {/* Agent icon + label */}
+              <div className="flex items-center gap-2 flex-1 min-w-0">
+                <span className="opacity-60 flex-shrink-0">{STAGE_ICONS[s.stage]}</span>
+                <span className={cn(
+                  'text-sm font-semibold truncate',
+                  s.status === 'pending' ? 'text-slate-400' : 'text-slate-800',
+                )}>
+                  {s.label}
+                </span>
+                {s.status === 'running' && s.attempt && s.attempt > 1 && (
+                  <span className="text-[10px] font-bold px-2 py-0.5 bg-amber-100 text-amber-700 rounded-full flex-shrink-0">
+                    Retry {s.attempt}
+                  </span>
+                )}
+              </div>
+
+              {/* Status badge / duration */}
+              <div className="flex-shrink-0 text-right">
+                {s.status === 'done' && s.duration !== undefined && (
+                  <span className="text-xs font-medium text-emerald-600">{formatDuration(s.duration)}</span>
+                )}
+                {s.status === 'running' && (
+                  <span className="text-xs font-semibold text-accent-600 animate-pulse">Running...</span>
+                )}
+                {s.status === 'pending' && (
+                  <span className="text-xs text-slate-300">Waiting</span>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+
+        {/* Note */}
+        <p className="text-center text-xs text-slate-400">
+          Each agent calls the AI model independently — this takes 2–4 minutes total.
+        </p>
+      </div>
+    );
+  };
+
+  const renderError = () => {
+    const isTokenError = !!error && (
+      error.toLowerCase().includes('token limit') ||
+      error.toLowerCase().includes('tokens used:')
+    );
+    const tokensUsed = error?.match(/Tokens used:\s*([\d,]+)/i)?.[1];
+    const tokensLimit = error?.match(/Model limit:\s*([\d,]+)/i)?.[1];
+
+    return (
+      <div className="bg-white rounded-2xl border border-rose-200 shadow-sm p-8 text-center">
+        <AlertCircle className="w-12 h-12 text-rose-400 mx-auto mb-4" />
+        <h3 className="text-lg font-bold text-slate-900 mb-2">
+          {isTokenError ? 'Input Too Long' : 'Something went wrong'}
+        </h3>
+        {error && (
+          isTokenError ? (
+            <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 mb-6 max-w-md mx-auto text-left space-y-3">
+              <p className="text-sm font-semibold text-amber-800">Token Limit Exceeded</p>
+              <p className="text-sm text-amber-700">
+                Your problem statement is too long for the AI model to process in a single request.
+              </p>
+              {(tokensUsed || tokensLimit) && (
+                <div className="grid grid-cols-2 gap-3 mt-2">
+                  {tokensUsed && (
+                    <div className="bg-white rounded-lg p-2.5 border border-amber-100">
+                      <p className="text-[10px] text-amber-500 font-bold uppercase tracking-wide">Tokens Used</p>
+                      <p className="text-xl font-extrabold text-amber-700">{tokensUsed}</p>
+                    </div>
+                  )}
+                  {tokensLimit && (
+                    <div className="bg-white rounded-lg p-2.5 border border-amber-100">
+                      <p className="text-[10px] text-amber-500 font-bold uppercase tracking-wide">Model Limit</p>
+                      <p className="text-xl font-extrabold text-amber-700">{tokensLimit}</p>
+                    </div>
+                  )}
+                </div>
+              )}
+              <p className="text-xs text-amber-600 bg-amber-100 rounded-lg px-3 py-2">
+                Tip: Shorten or summarize your problem statement, or split it into smaller sections.
+              </p>
+            </div>
+          ) : (
+            <div className="bg-rose-50 border border-rose-200 rounded-lg p-3 mb-6 max-w-lg mx-auto text-left">
+              <p className="text-xs font-semibold text-rose-600 uppercase tracking-wide mb-1">Error Details</p>
+              <p className="text-sm text-rose-800 font-mono break-words whitespace-pre-wrap">{error}</p>
+            </div>
+          )
+        )}
+        <button
+          onClick={() => setPhase('input')}
+          className="inline-flex items-center gap-2 bg-accent-600 text-white font-semibold py-2.5 px-5 rounded-xl hover:bg-accent-700 transition-colors"
+        >
+          <RotateCcw className="w-4 h-4" />
+          Try Again
+        </button>
+      </div>
+    );
+  };
 
   // ─── Phase: INPUT ────────────────────────────────────────────────────
 
@@ -596,84 +850,74 @@ export const IdeaEntry: React.FC = () => {
 
   // ─── Phase: RESULT ───────────────────────────────────────────────────
 
+  // ─── Phase: RESULT ───────────────────────────────────────────────────
+
   const renderResultPhase = () => (
-    <div className="space-y-6">
-      {/* QA Status */}
-      <div className="flex flex-wrap items-center gap-3 md:gap-4">
-        <div className={cn(
-          'inline-flex items-center gap-2 px-4 py-2 rounded-full text-sm font-semibold',
-          qaPass
-            ? 'bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200'
-            : 'bg-amber-50 text-amber-700 ring-1 ring-amber-200',
-        )}>
-          {qaPass ? <CheckCircle2 className="w-4 h-4" /> : <AlertCircle className="w-4 h-4" />}
-          QA: {qaPass ? 'PASS' : 'WARNINGS'}
+    <div className="space-y-5">
+      {/* Compact context + QA status strip */}
+      <div className="flex flex-wrap items-center gap-3 bg-white border border-slate-200 rounded-xl px-5 py-3 shadow-sm">
+        {/* Context pills */}
+        <div className="flex flex-wrap items-center gap-2 flex-1 min-w-0">
+          {industry && (
+            <span className="inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-full bg-accent-50 text-accent-700 border border-accent-200">
+              <Globe className="w-3.5 h-3.5" />{industry}
+            </span>
+          )}
+          {consultingCompany && (
+            <span className="inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-full bg-slate-100 text-slate-700">
+              <Briefcase className="w-3.5 h-3.5" />{consultingCompany}
+            </span>
+          )}
+          {clientCompany && (
+            <span className="inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-full bg-slate-100 text-slate-700">
+              <Building2 className="w-3.5 h-3.5" />{clientCompany}
+            </span>
+          )}
         </div>
-        <span className="text-xs text-slate-400">
-          Generated in {attempts} attempt{attempts !== 1 ? 's' : ''}
-        </span>
-        <div className="sm:ml-auto">
+        {/* QA status + attempts + reset */}
+        <div className="flex items-center gap-3 flex-shrink-0">
+          <div className={cn(
+            'inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold',
+            qaPass
+              ? 'bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200'
+              : 'bg-amber-50 text-amber-700 ring-1 ring-amber-200',
+          )}>
+            {qaPass ? <CheckCircle2 className="w-3.5 h-3.5" /> : <AlertCircle className="w-3.5 h-3.5" />}
+            QA: {qaPass ? 'PASS' : 'WARNINGS'}
+          </div>
+          <span className="text-xs text-slate-400 hidden sm:block">
+            {attempts} attempt{attempts !== 1 ? 's' : ''}
+          </span>
           <button
             onClick={handleReset}
-            className="inline-flex items-center gap-2 text-sm font-medium text-accent-600 hover:text-accent-700 px-4 py-2 rounded-xl hover:bg-accent-50 transition-colors"
+            className="inline-flex items-center gap-1.5 text-xs font-semibold text-accent-600 hover:text-accent-700 px-3 py-1.5 rounded-xl hover:bg-accent-50 transition-colors"
           >
-            <RotateCcw className="w-4 h-4" />
+            <RotateCcw className="w-3.5 h-3.5" />
             New Analysis
           </button>
         </div>
       </div>
 
-      {/* QA Feedback if not passing */}
+      {/* QA feedback if not passing */}
       {!qaPass && qaFeedback && (
         <div className="bg-amber-50 border border-amber-200 rounded-xl px-5 py-3 text-sm text-amber-800 break-words">
           <strong>QA Feedback:</strong> {qaFeedback}
         </div>
       )}
 
-      {/* Two-panel layout: original idea (left) + report (right) */}
-      <div className="flex flex-col lg:flex-row gap-6">
-        {/* Left panel — Original Problem Statement */}
-        <div className="lg:w-80 xl:w-96 flex-shrink-0">
-          <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5 lg:sticky lg:top-20">
-            <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2 mb-3">
-              <FileText className="w-4 h-4 text-accent-500" />
-              Your Idea
-            </h3>
-            <div className="space-y-3 text-sm text-slate-600">
-              <div className="flex items-center gap-2 text-xs">
-                <Globe className="w-3.5 h-3.5 text-slate-400 flex-shrink-0" />
-                <span className="font-medium text-slate-700">{industry}</span>
-              </div>
-              <div className="flex items-center gap-2 text-xs">
-                <Briefcase className="w-3.5 h-3.5 text-slate-400 flex-shrink-0" />
-                <span className="font-medium text-slate-700">{consultingCompany}</span>
-              </div>
-              <div className="flex items-center gap-2 text-xs">
-                <Building2 className="w-3.5 h-3.5 text-slate-400 flex-shrink-0" />
-                <span className="font-medium text-slate-700">{clientCompany}</span>
-              </div>
-              <div className="border-t border-slate-100 pt-3">
-                <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Problem Statement</span>
-                <p className="mt-1.5 text-sm text-slate-700 leading-relaxed whitespace-pre-wrap break-words">
-                  {problemStatement}
-                </p>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Right panel — Full Report */}
-        <div className="flex-1 min-w-0">
-          <ReportDashboard markdown={finalOutput} />
-        </div>
-      </div>
+      {/* Full-width report */}
+      <ReportDashboard markdown={finalOutput} />
     </div>
   );
 
   // ─── Main render ─────────────────────────────────────────────────────
 
   return (
-    <Layout>
+    <Layout
+      contextIndustry={industry || undefined}
+      contextClient={clientCompany || undefined}
+      contextCompany={consultingCompany || undefined}
+    >
       <div className="mb-10">
         <nav className="mb-8 flex items-center gap-2 text-sm">
           <span className="text-slate-500">Dashboard</span>
@@ -688,7 +932,7 @@ export const IdeaEntry: React.FC = () => {
       {phase === 'input' && renderInputPhase()}
       {phase === 'analyzing' && renderSpinner('Extracting core assumptions...', 'The Master Agent is analyzing your opportunity canvas.')}
       {phase === 'review' && renderReviewPhase()}
-      {phase === 'generating' && renderSpinner('Running analysis pipeline...', 'Five specialized agents are working in parallel. This may take a minute or two.')}
+      {phase === 'generating' && renderGeneratingPhase()}
       {phase === 'result' && renderResultPhase()}
       {phase === 'error' && renderError()}
     </Layout>

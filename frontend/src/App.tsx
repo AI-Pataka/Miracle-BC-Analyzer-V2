@@ -4,7 +4,7 @@ import { AuthProvider } from './contexts/AuthContext';
 import { ProtectedRoute } from './components/ProtectedRoute';
 import { Login } from './pages/Login';
 import { Register } from './pages/Register';
-import { UserDashboard } from './pages/UserDashboard';
+import { ConfigPage } from './pages/ConfigPage';
 import { AdminDashboard } from './pages/AdminDashboard';
 import { CapabilityDashboard } from './pages/CapabilityDashboard';
 import { JourneyDashboard } from './pages/JourneyDashboard';
@@ -18,14 +18,15 @@ export default function App() {
         <Routes>
           <Route path="/login" element={<Login />} />
           <Route path="/register" element={<Register />} />
-          
-          <Route 
-            path="/dashboard" 
+
+          {/* Config page — replaces the old User Dashboard */}
+          <Route
+            path="/dashboard"
             element={
               <ProtectedRoute>
-                <UserDashboard />
+                <ConfigPage />
               </ProtectedRoute>
-            } 
+            }
           />
           
           <Route 
@@ -73,8 +74,8 @@ export default function App() {
             } 
           />
           
-          <Route path="/" element={<Navigate to="/dashboard" replace />} />
-          <Route path="*" element={<Navigate to="/dashboard" replace />} />
+          <Route path="/" element={<Navigate to="/idea-entry" replace />} />
+          <Route path="*" element={<Navigate to="/idea-entry" replace />} />
         </Routes>
       </Router>
     </AuthProvider>

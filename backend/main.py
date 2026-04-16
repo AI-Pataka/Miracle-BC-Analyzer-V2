@@ -14,8 +14,11 @@ Run with: uvicorn main:app --reload
 """
 
 import os
+import re
+import json
 from fastapi import FastAPI, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from typing import Optional
 from dotenv import load_dotenv
@@ -197,6 +200,27 @@ async def list_value_streams(user: UserInfo = Depends(get_current_user)):
     streams = list(get_all_value_streams(user.user_id))
     return {"value_streams": [s.to_dict() for s in streams], "count": len(streams)}
 
+# ── Token Error Helper ─────────────────────────────────────────────
+
+def _parse_token_error(e: Exception) -> dict | None:
+    """
+    Detect Anthropic token-limit errors and return token counts.
+    Handles: 'prompt is too long: 205819 tokens > 200000 maximum'
+    """
+    error_str = str(e)
+    lower = error_str.lower()
+    if not any(kw in lower for kw in ['too long', 'context_length', 'context_window', 'prompt is too']):
+        return None
+    # "prompt is too long: 205819 tokens > 200000 maximum"
+    match = re.search(r'(\d[\d,]*)\s+tokens?\s*[>≥]\s*(\d[\d,]*)', error_str)
+    if match:
+        return {
+            "used": int(match.group(1).replace(',', '')),
+            "limit": int(match.group(2).replace(',', '')),
+        }
+    return {"used": None, "limit": None}
+
+
 # LANGGRAPH ENDPOINTS — Analysis pipeline
 # ══════════════════════════════════════════════════════════════════════
 
@@ -272,6 +296,13 @@ async def initiate_analysis(
             message="Core assumptions extracted. Review and approve to proceed.",
         )
     except Exception as e:
+        token_info = _parse_token_error(e)
+        if token_info:
+            msg = "Token limit exceeded. Your input text is too long for the AI model."
+            if token_info["used"] and token_info["limit"]:
+                msg += f" Tokens used: {token_info['used']:,}, Model limit: {token_info['limit']:,}."
+            msg += " Please shorten your problem statement and try again."
+            raise HTTPException(status_code=413, detail=msg)
         raise HTTPException(
             status_code=500,
             detail=f"Master agent extraction failed: {str(e)}",
@@ -461,10 +492,65 @@ Billing Engine (Oracle, SAP) + Customer Portal
             message="Analysis complete." if result["qa_pass"] else "Analysis complete with QA warnings.",
         )
     except Exception as e:
+        token_info = _parse_token_error(e)
+        if token_info:
+            msg = "Token limit exceeded. The combined input is too long for the AI model."
+            if token_info["used"] and token_info["limit"]:
+                msg += f" Tokens used: {token_info['used']:,}, Model limit: {token_info['limit']:,}."
+            msg += " Please shorten your problem statement or assumptions and try again."
+            raise HTTPException(status_code=413, detail=msg)
         raise HTTPException(
             status_code=500,
             detail=f"Pipeline execution failed: {str(e)}",
         )
+
+
+@app.post("/api/approve/stream")
+async def approve_and_stream(
+    req: ApproveRequest,
+    user: UserInfo = Depends(get_current_user),
+):
+    """
+    Streaming variant of /api/approve.
+    Returns a Server-Sent Events stream — each agent stage emits an event
+    as it completes so the frontend can display live progress.
+    """
+    from app.orchestrator import run_full_pipeline_streaming
+
+    if not req.approved:
+        async def rejected():
+            yield f"data: {json.dumps({'type': 'complete', 'qa_pass': False, 'qa_feedback': 'User rejected the assumptions.', 'attempts': 0, 'final_output': ''})}\n\n"
+        return StreamingResponse(rejected(), media_type="text/event-stream")
+
+    if not req.input_text.strip() or not req.core_assumptions.strip():
+        raise HTTPException(status_code=400, detail="Both input_text and core_assumptions are required.")
+
+    async def event_stream():
+        try:
+            async for event in run_full_pipeline_streaming(
+                input_text=req.input_text,
+                user_id=user.user_id,
+                core_assumptions=req.core_assumptions,
+            ):
+                yield f"data: {json.dumps(event)}\n\n"
+        except Exception as e:
+            token_info = _parse_token_error(e)
+            if token_info:
+                detail = "Token limit exceeded. Your input is too long for the AI model."
+                if token_info["used"] and token_info["limit"]:
+                    detail += f" Tokens used: {token_info['used']:,}, Model limit: {token_info['limit']:,}."
+            else:
+                detail = f"Pipeline execution failed: {str(e)}"
+            yield f"data: {json.dumps({'type': 'error', 'detail': detail})}\n\n"
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 # ══════════════════════════════════════════════════════════════════════

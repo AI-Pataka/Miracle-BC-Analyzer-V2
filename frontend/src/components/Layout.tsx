@@ -1,18 +1,29 @@
 import React, { useState, useEffect } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import {
-  LayoutDashboard, Users, LogOut, BarChart3, ShieldCheck,
+  LogOut, BarChart3, ShieldCheck,
   Layers, Route, SlidersHorizontal, Zap, PanelLeftClose, PanelLeft,
-  Building2, Briefcase, Globe, Menu, X,
+  Building2, Briefcase, Globe, Menu, X, ChevronRight, Settings,
 } from 'lucide-react';
 import { auth } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { cn } from '../lib/utils';
 
-export const Layout: React.FC<{ children: React.ReactNode; noPadding?: boolean }> = ({ children, noPadding }) => {
+export const Layout: React.FC<{
+  children: React.ReactNode;
+  noPadding?: boolean;
+  contextIndustry?: string;
+  contextClient?: string;
+  contextCompany?: string;
+}> = ({ children, noPadding, contextIndustry, contextClient, contextCompany }) => {
   const { profile, isAdmin } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
+
+  // Use passed context props (active analysis values) with profile as fallback
+  const displayIndustry = contextIndustry || profile?.industry;
+  const displayClient = contextClient || profile?.client_company;
+  const displayCompany = contextCompany || profile?.consultant_name;
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
 
@@ -37,16 +48,27 @@ export const Layout: React.FC<{ children: React.ReactNode; noPadding?: boolean }
     navigate('/login');
   };
 
-  const navItems = [
-    { label: 'Dashboard', path: '/dashboard', icon: LayoutDashboard, show: true },
+  const topNavItems = [
     { label: 'Idea Entry', path: '/idea-entry', icon: Zap, show: true },
+  ];
+
+  const configNavItems = [
     { label: 'Capabilities', path: '/capabilities', icon: Layers, show: true },
     { label: 'Journeys', path: '/journeys', icon: Route, show: true },
     { label: 'Strategy & Rules', path: '/strategy', icon: SlidersHorizontal, show: true },
-    { label: 'Admin Panel', path: '/admin/dashboard', icon: ShieldCheck, show: isAdmin },
+    { label: 'Admin Controls', path: '/admin/dashboard', icon: ShieldCheck, show: isAdmin },
   ];
 
-  const hasProfileSetup = profile?.industry || profile?.client_company || profile?.consultant_name;
+  const configPaths = ['/dashboard', '/capabilities', '/journeys', '/strategy', '/admin/dashboard'];
+  const isOnConfigPath = configPaths.includes(location.pathname);
+  const [configOpen, setConfigOpen] = React.useState(isOnConfigPath);
+
+  // Auto-open config group when navigating to a config page
+  React.useEffect(() => {
+    if (isOnConfigPath) setConfigOpen(true);
+  }, [isOnConfigPath]);
+
+  const hasProfileSetup = displayIndustry || displayClient || displayCompany;
 
   return (
     <div className="flex h-screen bg-slate-50 overflow-hidden">
@@ -85,8 +107,9 @@ export const Layout: React.FC<{ children: React.ReactNode; noPadding?: boolean }
         </div>
 
         {/* Navigation */}
-        <nav className="flex-1 px-2 py-4 space-y-1">
-          {navItems.filter(item => item.show).map((item) => (
+        <nav className="flex-1 px-2 py-4 space-y-1 overflow-y-auto">
+          {/* Top nav items — Dashboard, Idea Entry */}
+          {topNavItems.filter(item => item.show).map((item) => (
             <Link
               key={item.path}
               to={item.path}
@@ -103,28 +126,107 @@ export const Layout: React.FC<{ children: React.ReactNode; noPadding?: boolean }
               {!collapsed && item.label}
             </Link>
           ))}
+
+          {/* Config group — collapsible when expanded, flat icons when collapsed */}
+          {collapsed ? (
+            // Collapsed sidebar: render Config icon + config item icons as flat icon buttons
+            <>
+              <Link
+                to="/dashboard"
+                title="Config"
+                className={cn(
+                  'flex items-center justify-center rounded-lg transition-colors font-medium px-3 py-3',
+                  location.pathname === '/dashboard'
+                    ? 'bg-accent-600 text-white'
+                    : 'text-slate-400 hover:bg-slate-800 hover:text-white',
+                )}
+              >
+                <Settings className="w-5 h-5 flex-shrink-0" />
+              </Link>
+              {configNavItems.filter(item => item.show).map((item) => (
+                <Link
+                  key={item.path}
+                  to={item.path}
+                  title={item.label}
+                  className={cn(
+                    'flex items-center justify-center rounded-lg transition-colors font-medium px-3 py-3',
+                    location.pathname === item.path
+                      ? 'bg-accent-600 text-white'
+                      : 'text-slate-400 hover:bg-slate-800 hover:text-white',
+                  )}
+                >
+                  <item.icon className="w-5 h-5 flex-shrink-0" />
+                </Link>
+              ))}
+            </>
+          ) : (
+            // Expanded sidebar: collapsible "Config" group
+            <div className="mt-1">
+              {/* Config group header — links to /dashboard, with expand/collapse for sub-items */}
+              <div className="flex items-center rounded-lg overflow-hidden">
+                <Link
+                  to="/dashboard"
+                  className={cn(
+                    'flex-1 flex items-center gap-3 px-4 py-2.5 transition-colors font-medium text-sm',
+                    location.pathname === '/dashboard'
+                      ? 'bg-accent-600 text-white'
+                      : 'text-slate-400 hover:bg-slate-800 hover:text-white',
+                  )}
+                >
+                  <Settings className="w-5 h-5 flex-shrink-0" />
+                  <span>Config</span>
+                </Link>
+                <button
+                  title={configOpen ? 'Collapse config menu' : 'Expand config menu'}
+                  onClick={() => setConfigOpen(o => !o)}
+                  className="px-2 py-2.5 text-slate-400 hover:bg-slate-800 hover:text-white transition-colors"
+                >
+                  <ChevronRight className={cn('w-4 h-4 transition-transform duration-150', configOpen && 'rotate-90')} />
+                </button>
+              </div>
+              {configOpen && (
+                <div className="mt-0.5 ml-3 pl-3 border-l border-slate-700 space-y-0.5">
+                  {configNavItems.filter(item => item.show).map((item) => (
+                    <Link
+                      key={item.path}
+                      to={item.path}
+                      className={cn(
+                        'flex items-center gap-3 px-3 py-2.5 rounded-lg transition-colors font-medium text-sm',
+                        location.pathname === item.path
+                          ? 'bg-accent-600 text-white'
+                          : 'text-slate-400 hover:bg-slate-800 hover:text-white',
+                      )}
+                    >
+                      <item.icon className="w-4 h-4 flex-shrink-0" />
+                      {item.label}
+                    </Link>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
         </nav>
 
         {/* Context info (collapsed: hidden) */}
         {!collapsed && hasProfileSetup && (
           <div className="px-4 pb-2">
             <div className="rounded-lg bg-slate-800/60 px-3 py-2.5 space-y-1 text-xs">
-              {profile?.consultant_name && (
+              {displayCompany && (
                 <div className="flex items-center gap-2 text-slate-300">
                   <Briefcase className="w-3.5 h-3.5 text-slate-500 flex-shrink-0" />
-                  <span className="truncate">{profile.consultant_name}</span>
+                  <span className="truncate">{displayCompany}</span>
                 </div>
               )}
-              {profile?.client_company && (
+              {displayClient && (
                 <div className="flex items-center gap-2 text-slate-300">
                   <Building2 className="w-3.5 h-3.5 text-slate-500 flex-shrink-0" />
-                  <span className="truncate">{profile.client_company}</span>
+                  <span className="truncate">{displayClient}</span>
                 </div>
               )}
-              {profile?.industry && (
+              {displayIndustry && (
                 <div className="flex items-center gap-2 text-slate-300">
                   <Globe className="w-3.5 h-3.5 text-slate-500 flex-shrink-0" />
-                  <span className="truncate">{profile.industry}</span>
+                  <span className="truncate">{displayIndustry}</span>
                 </div>
               )}
             </div>

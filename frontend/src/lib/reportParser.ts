@@ -131,7 +131,13 @@ export function parseReport(markdown: string): ParsedReport {
     });
   }
 
-  return { title: reportTitle, sections };
+  // Reorder: move 'recommendations' sections to just before 'appendix' sections
+  const nonSpecial = sections.filter(s => s.type !== 'appendix' && s.type !== 'recommendations');
+  const recos = sections.filter(s => s.type === 'recommendations');
+  const appendices = sections.filter(s => s.type === 'appendix');
+  const reorderedSections = [...nonSpecial, ...recos, ...appendices];
+
+  return { title: reportTitle, sections: reorderedSections };
 }
 
 function extractSubsections(content: string): { title: string; content: string }[] {
@@ -187,7 +193,7 @@ export function extractBullets(content: string): string[] {
   return content
     .split('\n')
     .filter(l => /^\s*[-*✅•]\s+/.test(l))
-    .map(l => l.replace(/^\s*[-*✅•]\s+/, '').trim());
+    .map(l => stripMarkdown(l.replace(/^\s*[-*✅•]\s+/, '').trim()));
 }
 
 /**
@@ -198,7 +204,147 @@ export function extractKeyValues(content: string): { key: string; value: string 
   const regex = /\*\*(.+?):\*\*\s*(.+)/g;
   let match;
   while ((match = regex.exec(content)) !== null) {
-    pairs.push({ key: match[1].trim(), value: match[2].trim() });
+    pairs.push({ key: stripMarkdown(match[1].trim()), value: stripMarkdown(match[2].trim()) });
   }
   return pairs;
+}
+
+/**
+ * Strip markdown syntax from text (bold, italic, inline code, headers, links).
+ */
+export function stripMarkdown(text: string): string {
+  return text
+    .replace(/\*\*(.+?)\*\*/g, '$1')
+    .replace(/\*(.+?)\*/g, '$1')
+    .replace(/`(.+?)`/g, '$1')
+    .replace(/^#{1,6}\s+/gm, '')
+    .replace(/\[(.+?)\]\(.+?\)/g, '$1')
+    .trim();
+}
+
+// ─── KPI extraction ─────────────────────────────────────────────────────────
+
+export interface KPIItem {
+  name: string;
+  current?: string;
+  target?: string;
+  gap?: string;
+  timeframe?: string;
+  owner?: string;
+}
+
+/**
+ * Extract detailed KPI blocks from content.
+ * Expects format: "KPI: name\nCurrent: ...\nTarget: ...\nGap: ...\nTimeframe: ...\nOwner: ..."
+ */
+export function extractKPIs(content: string): KPIItem[] {
+  const kpis: KPIItem[] = [];
+  // Split on lines starting with "KPI:"
+  const blocks = content.split(/^KPI:\s*/m).filter(b => b.trim());
+  for (const block of blocks) {
+    const lines = block.split('\n');
+    const name = stripMarkdown(lines[0].trim());
+    if (!name) continue;
+    const kpi: KPIItem = { name };
+    for (const line of lines.slice(1)) {
+      const m = line.match(/^(Current|Target|Gap|Timeframe|Owner):\s*(.+)/i);
+      if (m) {
+        const key = m[1].toLowerCase() as keyof KPIItem;
+        (kpi as Record<string, string>)[key] = stripMarkdown(m[2].trim());
+      }
+    }
+    kpis.push(kpi);
+  }
+  return kpis;
+}
+
+// ─── SWOT extraction ─────────────────────────────────────────────────────────
+
+export interface SwotData {
+  strengths: string[];
+  weaknesses: string[];
+  opportunities: string[];
+  threats: string[];
+}
+
+/**
+ * Extract SWOT quadrants from labeled sections or markdown tables.
+ */
+export function extractSwotQuadrants(content: string): SwotData {
+  const result: SwotData = { strengths: [], weaknesses: [], opportunities: [], threats: [] };
+  let current: keyof SwotData | null = null;
+
+  for (const line of content.split('\n')) {
+    const trimmed = line.trim();
+    if (/^strengths?:?\s*$/i.test(trimmed)) { current = 'strengths'; continue; }
+    if (/^weaknesses?:?\s*$/i.test(trimmed)) { current = 'weaknesses'; continue; }
+    if (/^opportunities?:?\s*$/i.test(trimmed)) { current = 'opportunities'; continue; }
+    if (/^threats?:?\s*$/i.test(trimmed)) { current = 'threats'; continue; }
+    if (current && /^\s*[-*•✅]\s+/.test(line)) {
+      result[current].push(stripMarkdown(line.replace(/^\s*[-*•✅]\s+/, '').trim()));
+    }
+  }
+
+  // Fallback: parse as two side-by-side markdown tables (legacy format)
+  if (result.strengths.length === 0) {
+    const tableBlocks = content.split(/\n(?=\|)/).filter(b => b.includes('|'));
+    for (const block of tableBlocks) {
+      const t = parseMarkdownTable(block);
+      if (t.headers.length >= 2) {
+        const h0 = t.headers[0].toLowerCase();
+        const h1 = t.headers[1].toLowerCase();
+        if (h0.includes('strength') && h1.includes('weakness')) {
+          result.strengths = t.rows.map(r => stripMarkdown(r[0] || ''));
+          result.weaknesses = t.rows.map(r => stripMarkdown(r[1] || ''));
+        } else if (h0.includes('opportunit') && h1.includes('threat')) {
+          result.opportunities = t.rows.map(r => stripMarkdown(r[0] || ''));
+          result.threats = t.rows.map(r => stripMarkdown(r[1] || ''));
+        }
+      }
+    }
+  }
+
+  return result;
+}
+
+// ─── Porter's Forces extraction ───────────────────────────────────────────────
+
+export interface PortersForce {
+  name: string;
+  analysis: string;
+}
+
+const PORTERS_FORCE_NAMES = [
+  'Threat of New Entrants',
+  'Bargaining Power of Suppliers',
+  'Bargaining Power of Buyers',
+  'Threat of Substitutes',
+  'Industry Rivalry',
+];
+
+/**
+ * Extract Porter's Five Forces from labeled text or markdown table.
+ */
+export function extractPortersForces(content: string): PortersForce[] {
+  const forces: PortersForce[] = [];
+
+  // Try labeled format: "Force Name: analysis text"
+  for (const name of PORTERS_FORCE_NAMES) {
+    const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const regex = new RegExp(`${escaped}\\s*:\\s*([^\\n]+(?:\\n(?!(?:${PORTERS_FORCE_NAMES.map(n => n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})).*)*)`,'i');
+    const m = content.match(regex);
+    if (m) {
+      forces.push({ name, analysis: stripMarkdown(m[1].trim()) });
+    }
+  }
+
+  // Fallback: table format
+  if (forces.length === 0) {
+    const table = parseMarkdownTable(content);
+    for (const row of table.rows) {
+      if (row[0]) forces.push({ name: stripMarkdown(row[0]), analysis: stripMarkdown(row[1] || '') });
+    }
+  }
+
+  return forces;
 }

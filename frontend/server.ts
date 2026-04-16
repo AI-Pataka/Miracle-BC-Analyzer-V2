@@ -3,17 +3,26 @@ import { createServer as createViteServer } from "vite";
 import path from "path";
 import admin from "firebase-admin";
 import { fileURLToPath } from "url";
+import { existsSync } from "fs";
 // http-proxy-middleware no longer needed — Vite's built-in proxy handles /api forwarding
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Initialize Firebase Admin with service account
+// Initialize Firebase Admin — use service account file if present, otherwise fall back to Application Default Credentials
 if (!admin.apps.length) {
   const serviceAccountPath = path.resolve(__dirname, "../backend/firebase-service-account.json");
-  admin.initializeApp({
-    credential: admin.credential.cert(serviceAccountPath),
-  });
+  if (existsSync(serviceAccountPath)) {
+    admin.initializeApp({
+      credential: admin.credential.cert(serviceAccountPath),
+    });
+  } else {
+    // Fallback: Application Default Credentials (run `gcloud auth application-default login` first)
+    admin.initializeApp({
+      credential: admin.credential.applicationDefault(),
+      projectId: "gen-lang-client-0472422448",
+    });
+  }
 }
 
 const db = admin.firestore();

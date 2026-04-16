@@ -62,56 +62,79 @@ GOAL: Establish the strategic foundation by extracting the problem statement,
 KPIs, business impact, strategic recommendations, SWOT analysis, and Porter's 
 Five Forces assessment.
 
-ASSIGNED SLIDES: 1, 2, 7, 8, 10, 11
+ASSIGNED SLIDES: 1, 2, 7, 10, 11, 8
 
 RULES:
 - Extract KPIs DIRECTLY from the input text. Do NOT hallucinate metrics.
 - Root all analysis strictly in the initiative's context.
 - If a KPI or data point is not in the source text, state "Not provided in input."
 - Use the core assumptions provided as guardrails for your analysis.
+- Do NOT use markdown formatting (bold with **, italics with *, etc.) inside content fields.
+- Use plain, clear prose for all analysis text.
 
-OUTPUT FORMAT (strict Markdown):
+OUTPUT FORMAT:
 
 ## Slide 1: Problem Statement
 - [Concise problem statement extracted from input]
 - [Supporting context]
 
 ## Slide 2: Key Performance Indicators
-- [KPI 1 — extracted from text]
-- [KPI 2 — extracted from text]
-- [Additional KPIs as found]
+
+KPI: [KPI Name — e.g., Customer Onboarding Time]
+Current: [Current state or baseline from the input, or "Not established"]
+Target: [Target value or goal stated or implied in the input]
+Gap: [What needs to change to achieve the target]
+Timeframe: [Expected timeframe to achieve, or "Not specified"]
+Owner: [Responsible function, team, or role]
+
+KPI: [Next KPI Name]
+Current: ...
+Target: ...
+Gap: ...
+Timeframe: ...
+Owner: ...
+
+[Repeat for each distinct KPI found in the input — include at least 4]
 
 ## Slide 7: Business Impact
 - [Impact area 1]
 - [Impact area 2]
 - [Impact area 3]
 
-## Slide 8: Strategic Recommendations
-- [Recommendation 1]
-- [Recommendation 2]
-- [Recommendation 3]
-
 ## Slide 10: SWOT Analysis
 
-| Strengths | Weaknesses |
-|-----------|------------|
-| [S1] | [W1] |
-| [S2] | [W2] |
+Strengths:
+- [S1]
+- [S2]
 
-| Opportunities | Threats |
-|---------------|---------|
-| [O1] | [T1] |
-| [O2] | [T2] |
+Weaknesses:
+- [W1]
+- [W2]
+
+Opportunities:
+- [O1]
+- [O2]
+
+Threats:
+- [T1]
+- [T2]
 
 ## Slide 11: Porter's Five Forces
 
-| Force | Analysis |
-|-------|----------|
-| Threat of New Entrants | [Analysis] |
-| Bargaining Power of Suppliers | [Analysis] |
-| Bargaining Power of Buyers | [Analysis] |
-| Threat of Substitutes | [Analysis] |
-| Industry Rivalry | [Analysis] |"""),
+Threat of New Entrants: [2-3 sentence analysis specific to this initiative]
+
+Bargaining Power of Suppliers: [2-3 sentence analysis specific to this initiative]
+
+Bargaining Power of Buyers: [2-3 sentence analysis specific to this initiative]
+
+Threat of Substitutes: [2-3 sentence analysis specific to this initiative]
+
+Industry Rivalry: [2-3 sentence analysis specific to this initiative]
+
+## Slide 8: Strategic Recommendations
+- [Recommendation 1]
+- [Recommendation 2]
+- [Recommendation 3]"""),
     ("human", """Analyze this initiative and generate Slides 1, 2, 7, 8, 10, and 11.
 
 Core Assumptions:
@@ -273,9 +296,9 @@ OUTPUT FORMAT (strict Markdown):
 
 ## Slide 12: Capability-to-System Mapping
 
-| Level 1 Capability | Level 2 Capability | Level 3 Capability | Business Capability Owner | System Mapping | Rationale |
-|--------------------|--------------------|--------------------|--------------------------|----------------|-----------|
-| [L1] | [L2] | [L3] | [Owner] | [System] | [Rationale] |"""),
+| Level 1 Capability | Level 2 Capability | Level 3 Capability | System Mapping | Rationale |
+|--------------------|--------------------|--------------------|----------------|-----------|
+| [L1] | [L2] | [L3] | [System] | [Rationale] |"""),
     ("human", """Analyze this initiative and generate Slides 6 and 12.
 
 User ID for tool calls: {user_id}

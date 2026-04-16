@@ -68,7 +68,7 @@ def search_capability_kb(query: str, user_id: str) -> str:
     coll = db.document(f"users/{user_id}").collection("capabilities")
     
     try:
-        all_capabilities = coll.stream()
+        all_capabilities = [doc.to_dict() for doc in coll.stream() if doc.to_dict()]
     except Exception as e:
         return f"Error querying capabilities: {str(e)}"
     
@@ -119,7 +119,7 @@ def get_product_owner(action_keyword: str, user_id: str) -> str:
     coll = db.document(f"users/{user_id}").collection("products")
     
     try:
-        all_products = coll.stream()
+        all_products = [doc.to_dict() for doc in coll.stream() if doc.to_dict()]
     except Exception as e:
         return f"Error querying products: {str(e)}"
     
@@ -175,7 +175,7 @@ def get_journey_steps(journey_name: str, user_id: str) -> str:
     coll = db.document(f"users/{user_id}").collection("journeys")
     
     try:
-        all_journeys = coll.stream()
+        all_journeys = [doc.to_dict() for doc in coll.stream() if doc.to_dict()]
     except Exception as e:
         return f"Error querying journeys: {str(e)}"
     

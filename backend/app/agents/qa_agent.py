@@ -45,11 +45,13 @@ VIOLATION TYPE 1 — CAPEX/OPEX LEAKAGE:
 
 VIOLATION TYPE 2 — MISSING (New) FLAGS:
 - Any capability that was NOT found in the user's knowledge base MUST contain 
-  the exact string "(New)" in the Capability column of Slide 4.
-- Check: Does every row in Slide 4's table either reference a known capability 
-  OR contain "(New)"?
-- If a capability appears without "(New)" and there's no indication it was 
-  matched from the knowledge base, flag it.
+  the exact string "(New)" in the L4 Capability column of Slide 4.
+- ONLY flag a VIOLATION if a capability row does NOT contain "(New)" AND there 
+  is no evidence it was matched from the knowledge base.
+- Having ALL capabilities marked as "(New)" is VALID and is NOT a violation — 
+  this simply means none of them were found in the knowledge base, which is 
+  an expected and correct outcome. Do NOT flag this case.
+- Do NOT infer or assume the tool was skipped just because all items are (New).
 
 OUTPUT FORMAT (strict):
 If ALL checks pass:
