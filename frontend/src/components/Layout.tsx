@@ -12,10 +12,11 @@ import { cn } from '../lib/utils';
 export const Layout: React.FC<{
   children: React.ReactNode;
   noPadding?: boolean;
+  forceCollapsed?: boolean;
   contextIndustry?: string;
   contextClient?: string;
   contextCompany?: string;
-}> = ({ children, noPadding, contextIndustry, contextClient, contextCompany }) => {
+}> = ({ children, noPadding, forceCollapsed, contextIndustry, contextClient, contextCompany }) => {
   const { profile, isAdmin } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
@@ -37,6 +38,11 @@ export const Layout: React.FC<{
     mq.addEventListener('change', handler);
     return () => mq.removeEventListener('change', handler);
   }, []);
+
+  // Force-collapse sidebar when parent requests it (e.g. result phase needs max width)
+  useEffect(() => {
+    if (forceCollapsed) setCollapsed(true);
+  }, [forceCollapsed]);
 
   // Close mobile menu on route change
   useEffect(() => {

@@ -94,6 +94,7 @@ export const IdeaEntry: React.FC = () => {
   const [clientCompany, setClientCompany] = useState('');
   const [problemStatement, setProblemStatement] = useState('');
   const [uploadedFileName, setUploadedFileName] = useState<string | null>(null);
+  const [uploadError, setUploadError] = useState<string | null>(null);
 
   // Pipeline state
   const [phase, setPhase] = useState<EnginePhase>('input');
@@ -103,6 +104,7 @@ export const IdeaEntry: React.FC = () => {
   const [qaFeedback, setQaFeedback] = useState('');
   const [attempts, setAttempts] = useState(0);
   const [error, setError] = useState<string | null>(null);
+  const [ideaSummary, setIdeaSummary] = useState<string | null>(null);
 
   // Streaming pipeline progress
   type StageStatus = 'pending' | 'running' | 'done' | 'error';
@@ -205,10 +207,30 @@ export const IdeaEntry: React.FC = () => {
   const handleApprove = async () => {
     setPhase('generating');
     setError(null);
+    setIdeaSummary(null);
     setPipelineStages(PIPELINE_STAGE_DEFS);
+
+    // Ensure the generating phase UI paints before the SSE fetch starts
+    await new Promise<void>(r => requestAnimationFrame(() => requestAnimationFrame(() => r())));
+
     try {
       const token = await getIdToken();
       if (!token) throw new Error('Not authenticated. Please log in again.');
+
+      const inputText = composeInputText();
+
+      // Fire AI summary in parallel (non-critical — failures silently ignored)
+      fetch('/api/summarize', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ input_text: inputText, core_assumptions: coreAssumptions }),
+      })
+        .then(r => r.ok ? r.json() : null)
+        .then(data => { if (data?.summary) setIdeaSummary(data.summary); })
+        .catch(() => null);
 
       const res = await fetch('/api/approve/stream', {
         method: 'POST',
@@ -217,7 +239,7 @@ export const IdeaEntry: React.FC = () => {
           Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({
-          input_text: composeInputText(),
+          input_text: inputText,
           core_assumptions: coreAssumptions,
           approved: true,
         }),
@@ -313,20 +335,72 @@ export const IdeaEntry: React.FC = () => {
     setQaFeedback('');
     setAttempts(0);
     setError(null);
+    setIdeaSummary(null);
     setUploadedFileName(null);
     setPipelineStages(PIPELINE_STAGE_DEFS);
+  };
+
+  const TEXT_EXTENSIONS = ['.txt', '.md', '.csv', '.json', '.rtf'];
+  const BINARY_EXTENSIONS = ['.pdf', '.docx', '.xlsx', '.xls'];
+
+  const processFile = async (file: File) => {
+    setUploadError(null);
+    const ext = file.name.substring(file.name.lastIndexOf('.')).toLowerCase();
+
+    if (TEXT_EXTENSIONS.includes(ext)) {
+      // Read text files client-side
+      const reader = new FileReader();
+      reader.onload = ev => {
+        const text = ev.target?.result as string;
+        setProblemStatement(text.trim());
+        setUploadedFileName(file.name);
+      };
+      reader.readAsText(file);
+    } else if (BINARY_EXTENSIONS.includes(ext)) {
+      // Send binary files to backend for text extraction
+      try {
+        const token = await getIdToken();
+        if (!token) { setUploadError('Not authenticated. Please log in again.'); return; }
+
+        const base64 = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => {
+            const result = reader.result as string;
+            resolve(result.split(',')[1]); // strip data:...;base64, prefix
+          };
+          reader.onerror = () => reject(new Error('Failed to read file'));
+          reader.readAsDataURL(file);
+        });
+
+        const res = await fetch('/api/extract-text', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({ file_data: base64, filename: file.name }),
+        });
+
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({}));
+          throw new Error(errData.detail || `Text extraction failed (${res.status})`);
+        }
+
+        const data = await res.json();
+        setProblemStatement(data.text.trim());
+        setUploadedFileName(file.name);
+      } catch (err: any) {
+        setUploadError(err?.message || 'Failed to extract text from file.');
+      }
+    } else {
+      setUploadError(`Unsupported file type: ${ext}`);
+    }
   };
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    const reader = new FileReader();
-    reader.onload = ev => {
-      const text = ev.target?.result as string;
-      setProblemStatement(text.trim());
-      setUploadedFileName(file.name);
-    };
-    reader.readAsText(file);
+    processFile(file);
     e.target.value = '';
   };
 
@@ -342,13 +416,7 @@ export const IdeaEntry: React.FC = () => {
     setIsDragOver(false);
     const file = e.dataTransfer.files?.[0];
     if (!file) return;
-    const reader = new FileReader();
-    reader.onload = ev => {
-      const text = ev.target?.result as string;
-      setProblemStatement(text.trim());
-      setUploadedFileName(file.name);
-    };
-    reader.readAsText(file);
+    processFile(file);
   };
 
   // ─── Render helpers ──────────────────────────────────────────────────
@@ -492,14 +560,13 @@ export const IdeaEntry: React.FC = () => {
       <div className="bg-white rounded-2xl border border-rose-200 shadow-sm p-8 text-center">
         <AlertCircle className="w-12 h-12 text-rose-400 mx-auto mb-4" />
         <h3 className="text-lg font-bold text-slate-900 mb-2">
-          {isTokenError ? 'Input Too Long' : 'Something went wrong'}
+          {isTokenError ? 'Token Limit Reached' : 'Something went wrong'}
         </h3>
         {error && (
           isTokenError ? (
             <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 mb-6 max-w-md mx-auto text-left space-y-3">
-              <p className="text-sm font-semibold text-amber-800">Token Limit Exceeded</p>
-              <p className="text-sm text-amber-700">
-                Your problem statement is too long for the AI model to process in a single request.
+              <p className="text-sm font-semibold text-amber-800">
+                Analysis could not be completed — token limit reached.
               </p>
               {(tokensUsed || tokensLimit) && (
                 <div className="grid grid-cols-2 gap-3 mt-2">
@@ -518,7 +585,7 @@ export const IdeaEntry: React.FC = () => {
                 </div>
               )}
               <p className="text-xs text-amber-600 bg-amber-100 rounded-lg px-3 py-2">
-                Tip: Shorten or summarize your problem statement, or split it into smaller sections.
+                Shorten your problem statement and try again, or contact your administrator if this persists.
               </p>
             </div>
           ) : (
@@ -668,7 +735,7 @@ export const IdeaEntry: React.FC = () => {
                       </>
                     ) : (
                       <>
-                        <p className="text-[#141b2c] font-bold">Upload .txt</p>
+                        <p className="text-[#141b2c] font-bold">Upload File</p>
                         <p className="text-sm text-slate-500 mt-1">Drag and drop raw analytical data or click to browse</p>
                       </>
                     )}
@@ -680,10 +747,13 @@ export const IdeaEntry: React.FC = () => {
                 <input
                   ref={fileInputRef}
                   type="file"
-                  accept=".txt"
+                  accept=".txt,.md,.csv,.json,.rtf,.pdf,.docx,.xlsx,.xls"
                   className="hidden"
                   onChange={handleFileUpload}
                 />
+                {uploadError && (
+                  <p className="text-sm text-red-600 mt-1">{uploadError}</p>
+                )}
               </div>
             </div>
           </section>
@@ -850,10 +920,40 @@ export const IdeaEntry: React.FC = () => {
 
   // ─── Phase: RESULT ───────────────────────────────────────────────────
 
-  // ─── Phase: RESULT ───────────────────────────────────────────────────
+  const formatSummaryHtml = (summary: string): string => {
+    return summary
+      .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+      .replace(/^- (.+)$/gm, '<li>$1</li>')
+      .replace(/(<li>.*<\/li>\n?)+/g, '<ul class="list-disc list-inside space-y-1 my-2">$&</ul>')
+      .replace(/\n{2,}/g, '<br/><br/>')
+      .replace(/\n/g, '<br/>');
+  };
+
+  const renderSummaryPanel = () => (
+    <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden flex flex-col max-h-[calc(100vh-6rem)]">
+      <div className="bg-gradient-to-r from-accent-600 to-violet-600 px-3 py-2.5 flex items-center gap-2 flex-shrink-0">
+        <Zap className="w-3.5 h-3.5 text-white" />
+        <h3 className="text-xs font-bold text-white">Idea Summary</h3>
+      </div>
+      <div className="px-3 py-2.5 overflow-y-auto flex-1 min-h-0">
+        {ideaSummary ? (
+          <div
+            className="text-[11px] text-slate-700 leading-relaxed max-w-none [&_strong]:text-slate-900 [&_strong]:font-semibold [&_ul]:list-disc [&_ul]:list-inside [&_ul]:space-y-0.5 [&_ul]:my-1 [&_li]:text-slate-600"
+            dangerouslySetInnerHTML={{ __html: formatSummaryHtml(ideaSummary) }}
+          />
+        ) : (
+          <p className="text-[11px] text-slate-500 leading-relaxed">
+            {problemStatement.length > 300
+              ? problemStatement.slice(0, 300) + '...'
+              : problemStatement}
+          </p>
+        )}
+      </div>
+    </div>
+  );
 
   const renderResultPhase = () => (
-    <div className="space-y-5">
+    <div className="space-y-4 -mx-1 md:-mx-2 lg:mx-0">
       {/* Compact context + QA status strip */}
       <div className="flex flex-wrap items-center gap-3 bg-white border border-slate-200 rounded-xl px-5 py-3 shadow-sm">
         {/* Context pills */}
@@ -905,8 +1005,18 @@ export const IdeaEntry: React.FC = () => {
         </div>
       )}
 
-      {/* Full-width report */}
-      <ReportDashboard markdown={finalOutput} />
+      {/* Side-by-side: sticky summary left + report right */}
+      <div className="flex gap-3 items-start">
+        {/* Left panel — Idea Summary (sticky, scrollable, responsive width) */}
+        <div className="w-44 lg:w-52 xl:w-56 flex-shrink-0 sticky top-2 max-h-[calc(100vh-5rem)] hidden md:block">
+          {renderSummaryPanel()}
+        </div>
+
+        {/* Right panel — Full report (takes remaining width) */}
+        <div className="flex-1 min-w-0 overflow-x-auto">
+          <ReportDashboard markdown={finalOutput} />
+        </div>
+      </div>
     </div>
   );
 
@@ -917,6 +1027,7 @@ export const IdeaEntry: React.FC = () => {
       contextIndustry={industry || undefined}
       contextClient={clientCompany || undefined}
       contextCompany={consultingCompany || undefined}
+      forceCollapsed={phase === 'result'}
     >
       <div className="mb-10">
         <nav className="mb-8 flex items-center gap-2 text-sm">
