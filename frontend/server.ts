@@ -125,35 +125,10 @@ async function startServer() {
       }
 
       const backendRes = await fetch(backendUrl, fetchOptions);
-      const contentType = backendRes.headers.get("content-type") || "application/json";
       res.status(backendRes.status);
-      res.set("Content-Type", contentType);
-
-      // Stream SSE responses chunk-by-chunk instead of buffering the entire body
-      if (contentType.includes("text/event-stream") && backendRes.body) {
-        res.set("Cache-Control", "no-cache");
-        res.set("X-Accel-Buffering", "no");
-        res.set("Connection", "keep-alive");
-        res.flushHeaders();
-
-        const reader = backendRes.body.getReader();
-        try {
-          while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
-            res.write(value);
-            // @ts-ignore — flush exists on ServerResponse when compression is off
-            if (typeof res.flush === "function") res.flush();
-          }
-        } catch {
-          // Client disconnected
-        } finally {
-          res.end();
-        }
-      } else {
-        const data = await backendRes.text();
-        res.send(data);
-      }
+      const data = await backendRes.text();
+      res.set("Content-Type", backendRes.headers.get("content-type") || "application/json");
+      res.send(data);
     } catch (err: any) {
       console.error("Proxy error:", err.message);
       res.status(502).json({ error: "Backend unreachable", detail: err.message });

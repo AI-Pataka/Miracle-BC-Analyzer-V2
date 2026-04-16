@@ -24,16 +24,6 @@ export default defineConfig(({mode}) => {
         '/api/approve/stream': {
           target: 'http://localhost:8000',
           changeOrigin: true,
-          configure: (proxy) => {
-            proxy.on('proxyRes', (proxyRes, _req, res) => {
-              // Prevent any intermediate buffering of SSE events
-              proxyRes.headers['cache-control'] = 'no-cache';
-              proxyRes.headers['x-accel-buffering'] = 'no';
-              proxyRes.headers['content-type'] = 'text/event-stream';
-              res.setHeader('X-Accel-Buffering', 'no');
-              res.setHeader('Cache-Control', 'no-cache');
-            });
-          },
         },
         '/api': {
           target: 'http://localhost:8000',
