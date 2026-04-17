@@ -38,6 +38,72 @@ export enum OperationType {
   WRITE = 'write',
 }
 
+// ── Analysis persistence ──────────────────────────────────────────────
+
+export type AgentName =
+  | 'master' | 'context' | 'capability' | 'journey'
+  | 'systems' | 'financial' | 'qa';
+
+export type LLMProvider = 'anthropic' | 'openai' | 'google' | 'custom';
+
+export interface AgentConfigPublic {
+  agent_name: AgentName;
+  provider: LLMProvider;
+  model: string;
+  has_custom_key: boolean;
+  base_url: string;
+  temperature: number;
+  max_tokens: number;
+  skills_md: string;
+}
+
+export type StageName =
+  | 'context' | 'capability' | 'journey' | 'systems'
+  | 'financial' | 'merge' | 'qa';
+
+export interface StageState {
+  status: 'pending' | 'running' | 'done';
+  started_at: string;
+  duration_ms: number;
+  output: string;
+  attempt: number;
+}
+
+export interface AnalysisSummary {
+  analysis_id: string;
+  created_at: string;
+  updated_at: string;
+  industry: string;
+  consulting_company: string;
+  client_company: string;
+  initiative_name: string;
+  status: 'queued' | 'running' | 'completed' | 'failed';
+  qa_pass: boolean;
+  attempts: number;
+}
+
+export interface AnalysisRecord extends AnalysisSummary {
+  user_id: string;
+  problem_statement: string;
+  input_text: string;
+  core_assumptions: string;
+  current_stage: string;
+  stages: Record<StageName, StageState>;
+  events: AnalysisEvent[];
+  final_output: string;
+  qa_feedback: string;
+  error: string;
+}
+
+export type AnalysisEvent =
+  | { type: 'status'; status: string }
+  | { type: 'stage_start'; stage: StageName; label: string; attempt: number; started_at?: string }
+  | { type: 'stage_done'; stage: StageName; label: string; duration_ms: number }
+  | { type: 'stage_output'; stage: StageName; markdown: string }
+  | { type: 'qa_retry'; attempt: number; feedback: string }
+  | { type: 'complete'; qa_pass: boolean; qa_feedback: string; attempts: number; final_output: string }
+  | { type: 'error'; detail: string };
+
 export interface FirestoreErrorInfo {
   error: string;
   operationType: OperationType;

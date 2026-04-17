@@ -333,9 +333,189 @@ const RecommendationsSection: React.FC<{ section: ReportSection }> = ({ section 
   );
 };
 
+// ─── Value-Stream Capability Matrix ────────────────────────────────────────
+
+interface MatrixCapability {
+  name: string;
+  description: string;
+  isNew: boolean;
+}
+
+interface MatrixStage {
+  stage: string;
+  outcomes: string[];
+  capabilities: MatrixCapability[];
+  technologies: string[];
+  channels: string[];
+}
+
+function buildCapabilityMatrix(content: string): MatrixStage[] | null {
+  const table = parseMarkdownTable(content);
+  if (table.headers.length === 0 || table.rows.length === 0) return null;
+
+  const findIdx = (re: RegExp) =>
+    table.headers.findIndex(h => re.test(h.replace(/\*/g, '').trim()));
+
+  const stageIdx = findIdx(/value\s*stage|stage/i);
+  const outcomeIdx = findIdx(/outcome/i);
+  const l4Idx = findIdx(/l4\s*capability|^capability$|l4/i);
+  const descIdx = findIdx(/capability\s*description|description/i);
+  const techIdx = findIdx(/technology|tech/i);
+  const channelIdx = findIdx(/channel/i);
+
+  if (stageIdx < 0 || l4Idx < 0) return null;
+
+  const map = new Map<string, MatrixStage>();
+  const order: string[] = [];
+
+  const pushUnique = (arr: string[], v: string) => {
+    const clean = stripMarkdown(v).trim();
+    if (clean && !arr.includes(clean)) arr.push(clean);
+  };
+
+  for (const row of table.rows) {
+    const stage = stripMarkdown(row[stageIdx] || '').trim();
+    if (!stage) continue;
+
+    if (!map.has(stage)) {
+      map.set(stage, { stage, outcomes: [], capabilities: [], technologies: [], channels: [] });
+      order.push(stage);
+    }
+    const bucket = map.get(stage)!;
+
+    if (outcomeIdx >= 0) pushUnique(bucket.outcomes, row[outcomeIdx] || '');
+
+    const rawName = (row[l4Idx] || '').trim();
+    if (rawName) {
+      const isNew = /\(\s*new\s*\)/i.test(rawName);
+      const name = stripMarkdown(rawName.replace(/\(\s*new\s*\)/gi, '').trim());
+      const desc = descIdx >= 0 ? stripMarkdown(row[descIdx] || '').trim() : '';
+      if (name && !bucket.capabilities.some(c => c.name.toLowerCase() === name.toLowerCase())) {
+        bucket.capabilities.push({ name, description: desc, isNew });
+      }
+    }
+
+    if (techIdx >= 0) {
+      const techs = (row[techIdx] || '').split(/[,;/]/).map(s => s.trim()).filter(Boolean);
+      techs.forEach(t => pushUnique(bucket.technologies, t));
+    }
+    if (channelIdx >= 0) {
+      const chans = (row[channelIdx] || '').split(/[,;/]/).map(s => s.trim()).filter(Boolean);
+      chans.forEach(c => pushUnique(bucket.channels, c));
+    }
+  }
+
+  return order.map(s => map.get(s)!);
+}
+
+const CapabilityMatrixView: React.FC<{ stages: MatrixStage[]; title: string }> = ({ stages, title }) => {
+  const cols = stages.length;
+  const gridTemplate = `160px repeat(${cols}, minmax(220px, 1fr))`;
+
+  const RowLabel: React.FC<{ children: React.ReactNode }> = ({ children }) => (
+    <div className="bg-slate-900 text-white text-[11px] font-bold uppercase tracking-wider px-3 py-3 flex items-center sticky left-0 z-10">
+      {children}
+    </div>
+  );
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between flex-wrap gap-3">
+        <h4 className="text-sm font-bold text-slate-800 flex items-center gap-2">
+          <Grid3X3 className="w-4 h-4 text-slate-500" />
+          {title}
+        </h4>
+        <div className="flex items-center gap-3 text-[11px]">
+          <div className="flex items-center gap-1.5">
+            <span className="inline-block w-3 h-3 rounded-sm border-2 border-emerald-500 bg-emerald-50" />
+            <span className="text-slate-600 font-medium">New Capability</span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <span className="inline-block w-3 h-3 rounded-sm border-2 border-accent-500 bg-accent-50" />
+            <span className="text-slate-600 font-medium">Incedo Capability</span>
+          </div>
+        </div>
+      </div>
+
+      <div className="overflow-x-auto rounded-xl border border-slate-200">
+        <div className="grid min-w-max" style={{ gridTemplateColumns: gridTemplate }}>
+          <RowLabel>Value Stages</RowLabel>
+          {stages.map((s, i) => (
+            <div key={`stage-${i}`} className="bg-slate-800 text-white px-3 py-3 text-sm font-bold text-center border-l border-slate-700">
+              {s.stage}
+            </div>
+          ))}
+
+          <RowLabel>Stage Outcomes</RowLabel>
+          {stages.map((s, i) => (
+            <div key={`out-${i}`} className="bg-accent-50 px-3 py-3 text-[11px] text-slate-700 leading-snug border-l border-slate-200 border-t border-slate-200">
+              {s.outcomes.length ? s.outcomes.join(' · ') : <span className="text-slate-400 italic">—</span>}
+            </div>
+          ))}
+
+          <RowLabel>Capabilities</RowLabel>
+          {stages.map((s, i) => (
+            <div key={`cap-${i}`} className="bg-white px-2 py-2 space-y-1.5 border-l border-slate-200 border-t border-slate-200">
+              {s.capabilities.length === 0 ? (
+                <div className="text-[11px] text-slate-400 italic px-1 py-2">No capabilities</div>
+              ) : (
+                s.capabilities.map((c, j) => (
+                  <div
+                    key={j}
+                    className={`rounded-md border-2 px-2 py-1.5 ${
+                      c.isNew
+                        ? 'border-emerald-500 bg-emerald-50'
+                        : 'border-accent-500 bg-accent-50'
+                    }`}
+                    title={c.description}
+                  >
+                    <div className="flex items-start justify-between gap-1">
+                      <p className={`text-[11px] font-bold leading-tight ${c.isNew ? 'text-emerald-800' : 'text-accent-800'}`}>
+                        {c.name}
+                      </p>
+                    </div>
+                    {c.description && (
+                      <p className="text-[10px] text-slate-600 leading-snug mt-0.5 line-clamp-3">
+                        {c.description}
+                      </p>
+                    )}
+                  </div>
+                ))
+              )}
+            </div>
+          ))}
+
+          <RowLabel>Technology</RowLabel>
+          {stages.map((s, i) => (
+            <div key={`tech-${i}`} className="bg-slate-50 px-3 py-2.5 text-[11px] text-slate-700 leading-snug border-l border-slate-200 border-t border-slate-200">
+              {s.technologies.length ? s.technologies.join(', ') : <span className="text-slate-400 italic">—</span>}
+            </div>
+          ))}
+
+          <RowLabel>Channels</RowLabel>
+          {stages.map((s, i) => (
+            <div key={`ch-${i}`} className="bg-accent-600 text-white px-3 py-2.5 text-[11px] font-medium leading-snug border-l border-accent-500 border-t border-slate-200">
+              {s.channels.length ? s.channels.join(', ') : <span className="text-white/60 italic">—</span>}
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+};
+
 // ─── Capabilities Section ──────────────────────────────────────────────────
 
 const CapabilitiesSection: React.FC<{ section: ReportSection }> = ({ section }) => {
+  const matrix = buildCapabilityMatrix(section.content);
+  if (matrix && matrix.length > 0) {
+    return (
+      <SectionWrapper section={section}>
+        <CapabilityMatrixView stages={matrix} title={stripMarkdown(section.title)} />
+      </SectionWrapper>
+    );
+  }
+
   const subs = section.subsections || [];
   if (subs.length === 0) return <GenericSection section={section} />;
 

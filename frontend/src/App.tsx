@@ -10,6 +10,9 @@ import { CapabilityDashboard } from './pages/CapabilityDashboard';
 import { JourneyDashboard } from './pages/JourneyDashboard';
 import { StrategyDashboard } from './pages/StrategyDashboard';
 import { IdeaEntry } from './pages/IdeaEntry';
+import { AgentConfig } from './pages/AgentConfig';
+import { History } from './pages/History';
+import { AnalysisViewer } from './pages/AnalysisViewer';
 
 export default function App() {
   return (
@@ -65,15 +68,42 @@ export default function App() {
             } 
           />
 
-          <Route 
-            path="/capabilities" 
+          <Route
+            path="/capabilities"
             element={
               <ProtectedRoute>
                 <CapabilityDashboard />
               </ProtectedRoute>
-            } 
+            }
           />
-          
+
+          <Route
+            path="/agent-config"
+            element={
+              <ProtectedRoute>
+                <AgentConfig />
+              </ProtectedRoute>
+            }
+          />
+
+          <Route
+            path="/history"
+            element={
+              <ProtectedRoute>
+                <History />
+              </ProtectedRoute>
+            }
+          />
+
+          <Route
+            path="/history/:analysisId"
+            element={
+              <ProtectedRoute>
+                <AnalysisViewer />
+              </ProtectedRoute>
+            }
+          />
+
           <Route path="/" element={<Navigate to="/idea-entry" replace />} />
           <Route path="*" element={<Navigate to="/idea-entry" replace />} />
         </Routes>

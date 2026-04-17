@@ -4,6 +4,7 @@ import {
   LogOut, BarChart3, ShieldCheck,
   Layers, Route, SlidersHorizontal, Zap, PanelLeftClose, PanelLeft,
   Building2, Briefcase, Globe, Menu, X, ChevronRight, Settings,
+  History as HistoryIcon, Bot,
 } from 'lucide-react';
 import { auth } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
@@ -56,16 +57,18 @@ export const Layout: React.FC<{
 
   const topNavItems = [
     { label: 'Idea Entry', path: '/idea-entry', icon: Zap, show: true },
+    { label: 'History', path: '/history', icon: HistoryIcon, show: true },
   ];
 
   const configNavItems = [
+    { label: 'Agent Config', path: '/agent-config', icon: Bot, show: true },
     { label: 'Capabilities', path: '/capabilities', icon: Layers, show: true },
     { label: 'Journeys', path: '/journeys', icon: Route, show: true },
     { label: 'Strategy & Rules', path: '/strategy', icon: SlidersHorizontal, show: true },
     { label: 'Admin Controls', path: '/admin/dashboard', icon: ShieldCheck, show: isAdmin },
   ];
 
-  const configPaths = ['/dashboard', '/capabilities', '/journeys', '/strategy', '/admin/dashboard'];
+  const configPaths = ['/dashboard', '/capabilities', '/journeys', '/strategy', '/admin/dashboard', '/agent-config'];
   const isOnConfigPath = configPaths.includes(location.pathname);
   const [configOpen, setConfigOpen] = React.useState(isOnConfigPath);
 
@@ -115,23 +118,28 @@ export const Layout: React.FC<{
         {/* Navigation */}
         <nav className="flex-1 px-2 py-4 space-y-1 overflow-y-auto">
           {/* Top nav items — Dashboard, Idea Entry */}
-          {topNavItems.filter(item => item.show).map((item) => (
-            <Link
-              key={item.path}
-              to={item.path}
-              title={collapsed ? item.label : undefined}
-              className={cn(
-                'flex items-center gap-3 rounded-lg transition-colors font-medium',
-                collapsed ? 'px-3 py-3 justify-center' : 'px-4 py-3',
-                location.pathname === item.path
-                  ? 'bg-accent-600 text-white'
-                  : 'text-slate-400 hover:bg-slate-800 hover:text-white',
-              )}
-            >
-              <item.icon className="w-5 h-5 flex-shrink-0" />
-              {!collapsed && item.label}
-            </Link>
-          ))}
+          {topNavItems.filter(item => item.show).map((item) => {
+            const isActive = item.path === '/history'
+              ? location.pathname.startsWith('/history')
+              : location.pathname === item.path;
+            return (
+              <Link
+                key={item.path}
+                to={item.path}
+                title={collapsed ? item.label : undefined}
+                className={cn(
+                  'flex items-center gap-3 rounded-lg transition-colors font-medium',
+                  collapsed ? 'px-3 py-3 justify-center' : 'px-4 py-3',
+                  isActive
+                    ? 'bg-accent-600 text-white'
+                    : 'text-slate-400 hover:bg-slate-800 hover:text-white',
+                )}
+              >
+                <item.icon className="w-5 h-5 flex-shrink-0" />
+                {!collapsed && item.label}
+              </Link>
+            );
+          })}
 
           {/* Config group — collapsible when expanded, flat icons when collapsed */}
           {collapsed ? (

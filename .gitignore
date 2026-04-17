@@ -21,6 +21,11 @@ __pycache__/
 # Build artifacts
 frontend/dist/
 
+# Logs
+backend/logs/*.log
+logs/*.log
+*.log
+
 # Secrets
 .env
 backend/.env

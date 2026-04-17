@@ -698,6 +698,275 @@ async def extract_text(req: ExtractTextRequest, user: UserInfo = Depends(get_cur
 
 
 # ══════════════════════════════════════════════════════════════════════
+# PERSISTED ANALYSES — Background jobs, progressive streaming, history
+# ══════════════════════════════════════════════════════════════════════
+
+
+from fastapi import Query, Request, Response
+from fastapi.responses import Response as FastResponse
+
+from app import analysis_store, job_manager, export as export_mod, agent_config as agent_cfg
+from app.firebase_config import verify_firebase_token
+
+
+class AnalyzeStartRequest(BaseModel):
+    input_text: str
+    core_assumptions: str
+    industry: str = ""
+    consulting_company: str = ""
+    client_company: str = ""
+    problem_statement: str = ""
+
+
+class AnalyzeStartResponse(BaseModel):
+    analysis_id: str
+
+
+async def _user_from_query_or_header(
+    request: Request,
+    token: Optional[str] = Query(default=None),
+) -> UserInfo:
+    """
+    SSE-friendly auth: EventSource can't set headers, so we accept the Firebase
+    token either in the `Authorization: Bearer` header (preferred) or as a
+    `?token=` query parameter (fallback for browser EventSource).
+    """
+    raw = None
+    auth_header = request.headers.get("authorization") or request.headers.get("Authorization")
+    if auth_header and auth_header.lower().startswith("bearer "):
+        raw = auth_header.split(" ", 1)[1].strip()
+    elif token:
+        raw = token
+    if not raw:
+        raise HTTPException(status_code=401, detail="Missing auth token.")
+    try:
+        decoded = verify_firebase_token(raw)
+    except Exception as e:
+        raise HTTPException(status_code=401, detail=f"Invalid token: {e}")
+    return UserInfo(user_id=decoded["uid"], email=decoded.get("email", ""))
+
+
+@app.post("/api/analyze/start", response_model=AnalyzeStartResponse)
+async def analyze_start(
+    req: AnalyzeStartRequest,
+    user: UserInfo = Depends(get_current_user),
+):
+    """Create a persisted analysis doc and kick off a background task."""
+    if not req.input_text.strip() or not req.core_assumptions.strip():
+        raise HTTPException(status_code=400, detail="Both input_text and core_assumptions are required.")
+
+    analysis_id = analysis_store.create_analysis(
+        user.user_id,
+        input_text=req.input_text,
+        core_assumptions=req.core_assumptions,
+        industry=req.industry,
+        consulting_company=req.consulting_company,
+        client_company=req.client_company,
+        problem_statement=req.problem_statement or req.input_text,
+    )
+    job_manager.start_background_analysis(
+        user_id=user.user_id,
+        analysis_id=analysis_id,
+        input_text=req.input_text,
+        core_assumptions=req.core_assumptions,
+    )
+    return AnalyzeStartResponse(analysis_id=analysis_id)
+
+
+@app.get("/api/analyses/{analysis_id}/stream")
+async def analyze_stream(
+    analysis_id: str,
+    request: Request,
+    user: UserInfo = Depends(_user_from_query_or_header),
+):
+    """
+    SSE stream of analysis events. Replays persisted events from Firestore
+    first, then tails the in-process JobBus. Works for fresh-start and
+    reconnect-after-navigation equally.
+    """
+    doc = analysis_store.get_analysis(user.user_id, analysis_id)
+    if not doc:
+        raise HTTPException(status_code=404, detail="Analysis not found.")
+    replay = doc.get("events") or []
+
+    async def event_stream():
+        async for event in job_manager.stream_events(
+            user_id=user.user_id,
+            analysis_id=analysis_id,
+            replay=replay,
+        ):
+            if await request.is_disconnected():
+                return
+            yield f"data: {json.dumps(event)}\n\n"
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+@app.get("/api/analyses")
+async def analyses_list(
+    q: str = "",
+    industry: str = "",
+    client_company: str = "",
+    initiative: str = "",
+    date_from: str = "",
+    date_to: str = "",
+    limit: int = 100,
+    offset: int = 0,
+    user: UserInfo = Depends(get_current_user),
+):
+    rows = analysis_store.list_analyses(
+        user.user_id,
+        q=q, industry=industry, client_company=client_company,
+        initiative=initiative, date_from=date_from, date_to=date_to,
+        limit=limit, offset=offset,
+    )
+    return {"analyses": rows, "count": len(rows)}
+
+
+@app.get("/api/analyses/{analysis_id}")
+async def analyses_get(analysis_id: str, user: UserInfo = Depends(get_current_user)):
+    doc = analysis_store.get_analysis(user.user_id, analysis_id)
+    if not doc:
+        raise HTTPException(status_code=404, detail="Analysis not found.")
+    return doc
+
+
+@app.delete("/api/analyses/{analysis_id}")
+async def analyses_delete(analysis_id: str, user: UserInfo = Depends(get_current_user)):
+    doc = analysis_store.get_analysis(user.user_id, analysis_id)
+    if not doc:
+        raise HTTPException(status_code=404, detail="Analysis not found.")
+    analysis_store.delete_analysis(user.user_id, analysis_id)
+    return {"deleted": analysis_id}
+
+
+def _export_meta(doc: dict) -> dict:
+    return {
+        "initiative_name": doc.get("initiative_name", ""),
+        "industry": doc.get("industry", ""),
+        "client_company": doc.get("client_company", ""),
+        "consulting_company": doc.get("consulting_company", ""),
+        "created_at": doc.get("created_at", ""),
+    }
+
+
+def _export_filename(doc: dict, ext: str) -> str:
+    base = re.sub(r"[^a-zA-Z0-9_-]+", "_", (doc.get("initiative_name") or "analysis")).strip("_") or "analysis"
+    return f"{base[:60]}.{ext}"
+
+
+@app.get("/api/analyses/{analysis_id}/export/markdown")
+async def export_markdown(
+    analysis_id: str,
+    request: Request,
+    user: UserInfo = Depends(_user_from_query_or_header),
+):
+    doc = analysis_store.get_analysis(user.user_id, analysis_id)
+    if not doc or not doc.get("final_output"):
+        raise HTTPException(status_code=404, detail="Analysis or output not found.")
+    data = export_mod.render_markdown(doc["final_output"])
+    return Response(
+        content=data,
+        media_type="text/markdown; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{_export_filename(doc, "md")}"'},
+    )
+
+
+@app.get("/api/analyses/{analysis_id}/export/html")
+async def export_html(
+    analysis_id: str,
+    request: Request,
+    user: UserInfo = Depends(_user_from_query_or_header),
+):
+    doc = analysis_store.get_analysis(user.user_id, analysis_id)
+    if not doc or not doc.get("final_output"):
+        raise HTTPException(status_code=404, detail="Analysis or output not found.")
+    data = export_mod.render_html(doc["final_output"], _export_meta(doc))
+    return Response(
+        content=data,
+        media_type="text/html; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{_export_filename(doc, "html")}"'},
+    )
+
+
+@app.get("/api/analyses/{analysis_id}/export/pdf")
+async def export_pdf(
+    analysis_id: str,
+    request: Request,
+    user: UserInfo = Depends(_user_from_query_or_header),
+):
+    doc = analysis_store.get_analysis(user.user_id, analysis_id)
+    if not doc or not doc.get("final_output"):
+        raise HTTPException(status_code=404, detail="Analysis or output not found.")
+    try:
+        data = export_mod.render_pdf(doc["final_output"], _export_meta(doc))
+    except RuntimeError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    return Response(
+        content=data,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{_export_filename(doc, "pdf")}"'},
+    )
+
+
+# ══════════════════════════════════════════════════════════════════════
+# AGENT CONFIG ENDPOINTS — Per-agent LLM + Skills.md
+# ══════════════════════════════════════════════════════════════════════
+
+
+class AgentConfigPayload(BaseModel):
+    provider: str
+    model: str
+    api_key: Optional[str] = None
+    base_url: Optional[str] = None
+    temperature: float = 0.1
+    max_tokens: int = 8192
+    skills_md: str = ""
+    clear_api_key: bool = False
+
+
+@app.get("/api/agent-configs")
+async def list_agent_configs(user: UserInfo = Depends(get_current_user)):
+    return {"agents": agent_cfg.list_agent_configs(user.user_id)}
+
+
+@app.get("/api/agent-configs/{agent_name}")
+async def get_agent_config(agent_name: str, user: UserInfo = Depends(get_current_user)):
+    if agent_name not in agent_cfg.ALL_AGENTS:
+        raise HTTPException(status_code=404, detail=f"Unknown agent: {agent_name}")
+    cfg = agent_cfg.load_agent_config(user.user_id, agent_name)  # type: ignore[arg-type]
+    return cfg.to_public_dict()
+
+
+@app.put("/api/agent-configs/{agent_name}")
+async def put_agent_config(
+    agent_name: str,
+    payload: AgentConfigPayload,
+    user: UserInfo = Depends(get_current_user),
+):
+    if agent_name not in agent_cfg.ALL_AGENTS:
+        raise HTTPException(status_code=404, detail=f"Unknown agent: {agent_name}")
+    if payload.provider not in ("anthropic", "openai", "google", "custom"):
+        raise HTTPException(status_code=400, detail=f"Unknown provider: {payload.provider}")
+    cfg = agent_cfg.save_agent_config(
+        user.user_id, agent_name,  # type: ignore[arg-type]
+        provider=payload.provider,  # type: ignore[arg-type]
+        model=payload.model,
+        api_key=payload.api_key,
+        base_url=payload.base_url,
+        temperature=payload.temperature,
+        max_tokens=payload.max_tokens,
+        skills_md=payload.skills_md,
+        clear_api_key=payload.clear_api_key,
+    )
+    return cfg.to_public_dict()
+
+
+# ══════════════════════════════════════════════════════════════════════
 # RUN
 # ══════════════════════════════════════════════════════════════════════
 

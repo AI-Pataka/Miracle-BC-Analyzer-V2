@@ -75,7 +75,8 @@ class FirestoreRESTClient:
 
     def __init__(self, project_id: str):
         self.project_id = project_id
-        self.base_url = f"https://firestore.googleapis.com/v1/projects/{project_id}/databases/(default)/documents"
+        database_id = os.getenv("FIREBASE_DATABASE_ID", "(default)")
+        self.base_url = f"https://firestore.googleapis.com/v1/projects/{project_id}/databases/{database_id}/documents"
 
     def _headers(self):
         return {
@@ -85,10 +86,11 @@ class FirestoreRESTClient:
 
     def _encode_value(self, value):
         """Convert a Python value to Firestore REST API value format."""
-        if isinstance(value, str):
-            return {"stringValue": value}
-        elif isinstance(value, bool):
+        # Check bool before int since bool is a subclass of int in Python
+        if isinstance(value, bool):
             return {"booleanValue": value}
+        elif isinstance(value, str):
+            return {"stringValue": value}
         elif isinstance(value, int):
             return {"integerValue": str(value)}
         elif isinstance(value, float):
@@ -155,10 +157,13 @@ class CollectionRef:
             resp.raise_for_status()
         return resp.json()
 
+    def document(self, doc_id: str):
+        """Return a DocumentRef for a specific child document ID."""
+        return DocumentRef(self.client, f"{self.path}/{doc_id}")
+
     def stream(self):
-        """List all documents in the collection."""
+        """List all documents in the collection (no pagination)."""
         url = f"{self.client.base_url}/{self.path}"
-        docs = []
         with httpx.Client(verify=False) as http:
             resp = http.get(url, headers=self.client._headers())
             resp.raise_for_status()
@@ -179,6 +184,38 @@ class DocumentRef:
             resp = http.patch(url, headers=self.client._headers(), json={"fields": fields})
             resp.raise_for_status()
         return resp.json()
+
+    def get(self):
+        """Fetch the document; returns decoded dict or None if not found."""
+        url = f"{self.client.base_url}/{self.path}"
+        with httpx.Client(verify=False) as http:
+            resp = http.get(url, headers=self.client._headers())
+            if resp.status_code == 404:
+                return None
+            resp.raise_for_status()
+        return self.client._decode_document(resp.json())
+
+    def update(self, data: dict):
+        """
+        Merge top-level fields into the existing document using updateMask.
+        Only the keys in `data` are touched; other fields remain unchanged.
+        """
+        fields = {k: self.client._encode_value(v) for k, v in data.items()}
+        mask_params = "&".join(f"updateMask.fieldPaths={k}" for k in data.keys())
+        url = f"{self.client.base_url}/{self.path}?{mask_params}"
+        with httpx.Client(verify=False) as http:
+            resp = http.patch(url, headers=self.client._headers(), json={"fields": fields})
+            resp.raise_for_status()
+        return resp.json()
+
+    def delete(self):
+        """Delete the document. No-op if it doesn't exist."""
+        url = f"{self.client.base_url}/{self.path}"
+        with httpx.Client(verify=False) as http:
+            resp = http.delete(url, headers=self.client._headers())
+            if resp.status_code == 404:
+                return
+            resp.raise_for_status()
 
     def collection(self, name: str):
         return CollectionRef(self.client, f"{self.path}/{name}")

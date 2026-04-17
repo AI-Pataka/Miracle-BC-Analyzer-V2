@@ -1,25 +1,27 @@
 """
-LangGraph Orchestrator — Phase 4: Parallel State Machine
+LangGraph Orchestrator — parallel state machine + per-agent LLM config.
 
-Prompt: "Build the LangGraph state machine with parallel fan-out execution.
-Create orchestrator.py using a TypedDict state containing: input_text, user_id,
-core_assumptions, validation_status, qa_feedback, and a dictionary for sub-agent
-outputs. The Master Node extracts 5 core assumptions. A human-in-the-loop edge
-pauses the graph if validation_status is 'pending' and routes to the parallel
-fan-out if 'approved'. Implement LangGraph parallel branching to route state to
-the Context, Capability, Journey, Systems, and Financial nodes simultaneously.
-A Merge Node waits for all 5 sub-agents to finish and merges their outputs into
-a single Markdown string. Use Google Gemini via langchain-google-genai as the
-LLM. Bind the appropriate LangChain tools to each sub-agent that requires them."
+Each of the seven agents (master, context, capability, journey, systems,
+financial, qa) loads its own LangChain chat model from
+`app.agent_config.load_agent_config`, so users can override provider / model /
+API key / temperature / Skills.md per agent. Behavior matches the previous
+hardcoded `ChatAnthropic(claude-sonnet-4)` defaults when no override exists.
+
+Two streaming entry points exist:
+  * `run_full_pipeline_streaming`  — legacy sequential; preserved for the old
+    `/api/approve/stream` endpoint.
+  * `run_full_pipeline_streaming_v2` — wave-parallel + emits `stage_output`
+    events after each stage so the frontend can render progressively. This is
+    what the new `/api/analyze/start` + `/api/analyses/{id}/stream` pair uses.
 """
 
-import os
 import time
+import asyncio
 import operator
-from typing import TypedDict, Annotated, Literal
+from datetime import datetime, timezone
+from typing import TypedDict, Annotated, Literal, Callable, AsyncIterator
 from dotenv import load_dotenv
 
-from langchain_anthropic import ChatAnthropic
 from langchain_core.messages import HumanMessage
 from langgraph.graph import StateGraph, END
 
@@ -36,7 +38,8 @@ from app.tools.firestore_tools import (
     get_product_owner,
     get_journey_steps,
 )
-from app.agents.qa_agent import qa_validation_node
+from app.agents.qa_agent import qa_validation_node, run_qa_validation
+from app.agent_config import load_agent_config, build_llm, compose_prompt
 from app.logger import agent_logger, generate_run_id
 
 load_dotenv()
@@ -48,58 +51,65 @@ load_dotenv()
 
 class AnalyzerState(TypedDict):
     """Strict state schema passed between all nodes in the graph."""
-    # Input
     input_text: str
     user_id: str
-
-    # Master agent output
     core_assumptions: str
-
-    # Human-in-the-loop
     validation_status: str  # "pending" | "approved" | "rejected"
-
-    # Sub-agent outputs
     context_output: str
     capability_output: str
     journey_output: str
     systems_output: str
     financial_output: str
-
-    # QA
     qa_feedback: str
     qa_pass: bool
-
-    # Final compiled output
     final_output: str
 
 
 # ══════════════════════════════════════════════════════════════════════
-# LLM INITIALIZATION
+# PER-AGENT LLM + PROMPT LOADING
 # ══════════════════════════════════════════════════════════════════════
 
+def _build_agent_chain(
+    agent_name: str,
+    base_prompt,
+    user_id: str,
+    *,
+    temperature_override: float | None = None,
+    tools: list | None = None,
+):
+    """
+    Load the user's config for this agent, compose Skills.md into the prompt,
+    and return (chain, llm, cfg). Callers that need `llm.bind_tools(...)` can
+    use the raw llm; the chain already has tools bound when `tools` is given.
+    """
+    cfg = load_agent_config(user_id, agent_name)
+    if temperature_override is not None:
+        cfg.temperature = temperature_override
+    llm = build_llm(cfg)
+    composed_prompt = compose_prompt(base_prompt, cfg.skills_md)
+    if tools:
+        chain = composed_prompt | llm.bind_tools(tools)
+    else:
+        chain = composed_prompt | llm
+    return chain, llm, cfg
+
+
 def get_llm(temperature: float = 0.1):
-    """Initialize the Claude Sonnet LLM."""
-    return ChatAnthropic(
+    """
+    Backward-compat shim for code paths that want a Claude Sonnet LLM without
+    going through per-agent config (e.g. the /api/summarize endpoint). For
+    agent nodes, use `_build_agent_chain` instead.
+    """
+    from app.agent_config import AgentConfig, build_llm
+    return build_llm(AgentConfig(
+        agent_name="master", provider="anthropic",
         model="claude-sonnet-4-20250514",
-        anthropic_api_key=os.getenv("ANTHROPIC_API_KEY"),
-        temperature=temperature,
-        max_tokens=8192,
-        max_retries=3,
-    )
-
-
-def get_llm_with_tools(tools: list, temperature: float = 0.1):
-    """Initialize LLM with bound tools for agents that need Firestore access."""
-    llm = get_llm(temperature)
-    return llm.bind_tools(tools)
+        temperature=temperature, max_tokens=8192,
+    ))
 
 
 def invoke_with_retry(chain, inputs, max_retries: int = 6, base_delay: float = 3.0):
-    """
-    Invoke a LangChain chain with exponential backoff retry on overloaded (529)
-    or rate-limit (429) errors.
-    Retries up to max_retries times with delays of 3s, 6s, 12s, 24s, 48s, 96s.
-    """
+    """Invoke a chain with exponential backoff on 529/429 errors."""
     for attempt in range(max_retries + 1):
         try:
             return chain.invoke(inputs)
@@ -126,20 +136,13 @@ def invoke_with_retry(chain, inputs, max_retries: int = 6, base_delay: float = 3
 # NODE FUNCTIONS
 # ══════════════════════════════════════════════════════════════════════
 
-
 def master_node(state: AnalyzerState) -> dict:
-    """
-    Master Orchestrator: Extracts 5 core assumptions from the input.
-    This runs first, before the human validation gate.
-    """
+    """Master Orchestrator: extracts 5 core assumptions."""
     run_id = state.get("_run_id", "no-id")
     agent_logger.info(f"[{run_id}] MASTER AGENT — started")
-    llm = get_llm(temperature=0.2)
-    chain = MASTER_ORCHESTRATOR_PROMPT | llm
+    chain, _, _ = _build_agent_chain("master", MASTER_ORCHESTRATOR_PROMPT, state["user_id"])
 
-    response = invoke_with_retry(chain, {
-        "input_text": state["input_text"],
-    })
+    response = invoke_with_retry(chain, {"input_text": state["input_text"]})
 
     agent_logger.info(f"[{run_id}] MASTER AGENT — finished (assumptions extracted)")
     return {
@@ -149,11 +152,10 @@ def master_node(state: AnalyzerState) -> dict:
 
 
 def context_node(state: AnalyzerState) -> dict:
-    """Context Sub-Agent: Generates slides 1, 2, 7, 8, 10, 11."""
+    """Context Sub-Agent: slides 1, 2, 7, 8, 10, 11."""
     run_id = state.get("_run_id", "no-id")
     agent_logger.info(f"[{run_id}] CONTEXT AGENT — started")
-    llm = get_llm()
-    chain = CONTEXT_AGENT_PROMPT | llm
+    chain, _, _ = _build_agent_chain("context", CONTEXT_AGENT_PROMPT, state["user_id"])
 
     response = invoke_with_retry(chain, {
         "input_text": state["input_text"],
@@ -165,18 +167,13 @@ def context_node(state: AnalyzerState) -> dict:
 
 
 def capability_node(state: AnalyzerState) -> dict:
-    """
-    Capability Sub-Agent: Generates slides 3, 4, and Appendix A.
-    Uses search_capability_kb tool to validate capabilities.
-    """
+    """Capability Sub-Agent: slides 3, 4, Appendix A. Uses search_capability_kb."""
     run_id = state.get("_run_id", "no-id")
     agent_logger.info(f"[{run_id}] CAPABILITY AGENT — started")
-    llm = get_llm()
-    tools = [search_capability_kb]
-    llm_with_tools = llm.bind_tools(tools)
-
-    # First pass: let the agent identify capabilities and call tools
-    chain = CAPABILITY_AGENT_PROMPT | llm_with_tools
+    chain, llm, _ = _build_agent_chain(
+        "capability", CAPABILITY_AGENT_PROMPT, state["user_id"],
+        tools=[search_capability_kb],
+    )
 
     response = invoke_with_retry(chain, {
         "input_text": state["input_text"],
@@ -184,7 +181,6 @@ def capability_node(state: AnalyzerState) -> dict:
         "user_id": state["user_id"],
     })
 
-    # Handle tool calls if any
     output = response.content
     if hasattr(response, "tool_calls") and response.tool_calls:
         tool_results = []
@@ -193,7 +189,6 @@ def capability_node(state: AnalyzerState) -> dict:
                 result = search_capability_kb.invoke(tool_call["args"])
                 tool_results.append(f"Tool result for '{tool_call['args'].get('query', '')}': {result}")
 
-        # Second pass: generate final output with tool results
         followup_prompt = (
             f"Based on the following knowledge base search results, generate the final "
             f"Slides 3, 4, and Appendix A output.\n\n"
@@ -217,17 +212,13 @@ def capability_node(state: AnalyzerState) -> dict:
 
 
 def journey_node(state: AnalyzerState) -> dict:
-    """
-    Journey Sub-Agent: Generates slides 5 and 9.
-    Uses get_journey_steps tool to fetch journey framework.
-    """
+    """Journey Sub-Agent: slides 5, 9. Uses get_journey_steps."""
     run_id = state.get("_run_id", "no-id")
     agent_logger.info(f"[{run_id}] JOURNEY AGENT — started")
-    llm = get_llm()
-    tools = [get_journey_steps]
-    llm_with_tools = llm.bind_tools(tools)
-
-    chain = JOURNEY_AGENT_PROMPT | llm_with_tools
+    chain, llm, _ = _build_agent_chain(
+        "journey", JOURNEY_AGENT_PROMPT, state["user_id"],
+        tools=[get_journey_steps],
+    )
 
     response = invoke_with_retry(chain, {
         "input_text": state["input_text"],
@@ -258,17 +249,13 @@ def journey_node(state: AnalyzerState) -> dict:
 
 
 def systems_node(state: AnalyzerState) -> dict:
-    """
-    Systems Sub-Agent: Generates slides 6 and 12.
-    Uses get_product_owner tool to find system owners.
-    """
+    """Systems Sub-Agent: slides 6, 12. Uses get_product_owner."""
     run_id = state.get("_run_id", "no-id")
     agent_logger.info(f"[{run_id}] SYSTEMS AGENT — started")
-    llm = get_llm()
-    tools = [get_product_owner]
-    llm_with_tools = llm.bind_tools(tools)
-
-    chain = SYSTEMS_AGENT_PROMPT | llm_with_tools
+    chain, llm, _ = _build_agent_chain(
+        "systems", SYSTEMS_AGENT_PROMPT, state["user_id"],
+        tools=[get_product_owner],
+    )
 
     response = invoke_with_retry(chain, {
         "input_text": state["input_text"],
@@ -301,14 +288,10 @@ def systems_node(state: AnalyzerState) -> dict:
 
 
 def financial_node(state: AnalyzerState) -> dict:
-    """
-    Financial Sub-Agent: Generates Appendices B, C, and D.
-    No tools — works from journey and capability outputs.
-    """
+    """Financial Sub-Agent: Appendices B, C, D."""
     run_id = state.get("_run_id", "no-id")
     agent_logger.info(f"[{run_id}] FINANCIAL AGENT — started")
-    llm = get_llm()
-    chain = FINANCIAL_AGENT_PROMPT | llm
+    chain, _, _ = _build_agent_chain("financial", FINANCIAL_AGENT_PROMPT, state["user_id"])
 
     response = invoke_with_retry(chain, {
         "input_text": state["input_text"],
@@ -323,16 +306,7 @@ def financial_node(state: AnalyzerState) -> dict:
 
 
 def merge_node(state: AnalyzerState) -> dict:
-    """
-    Compiler Node: Merges all sub-agent outputs into a single Markdown document.
-    Waits for all 5 agents to complete before assembling.
-    """
-    sections = []
-
-    sections.append("# Business Capability Analysis Report\n")
-    sections.append("---\n")
-
-    # Helper to safely convert output to string
+    """Compiler Node: merge all sub-agent outputs into one Markdown document."""
     def to_str(val):
         if val is None:
             return ""
@@ -340,173 +314,99 @@ def merge_node(state: AnalyzerState) -> dict:
             return "\n".join(str(item) for item in val)
         return str(val)
 
-    # Context slides (1, 2, 7, 8, 10, 11)
-    if state.get("context_output"):
-        sections.append(to_str(state["context_output"]))
-        sections.append("\n---\n")
+    sections = ["# Business Capability Analysis Report\n", "---\n"]
 
-    # Capability slides (3, 4, Appendix A)
-    if state.get("capability_output"):
-        sections.append(to_str(state["capability_output"]))
-        sections.append("\n---\n")
+    for key in ("context_output", "capability_output", "journey_output",
+                "systems_output", "financial_output"):
+        if state.get(key):
+            sections.append(to_str(state[key]))
+            if key != "financial_output":
+                sections.append("\n---\n")
 
-    # Journey slides (5, 9)
-    if state.get("journey_output"):
-        sections.append(to_str(state["journey_output"]))
-        sections.append("\n---\n")
-
-    # Systems slides (6, 12)
-    if state.get("systems_output"):
-        sections.append(to_str(state["systems_output"]))
-        sections.append("\n---\n")
-
-    # Financial appendices (B, C, D)
-    if state.get("financial_output"):
-        sections.append(to_str(state["financial_output"]))
-
-    final = "\n".join(sections)
-
-    return {"final_output": final}
+    return {"final_output": "\n".join(sections)}
 
 
 # ══════════════════════════════════════════════════════════════════════
-# ROUTING FUNCTIONS
+# ROUTING FUNCTIONS (legacy graph)
 # ══════════════════════════════════════════════════════════════════════
-
 
 def validation_router(state: AnalyzerState) -> Literal["parallel_agents", "__end__"]:
-    """
-    Human-in-the-loop gate.
-    Routes to parallel fan-out if approved, ends if rejected.
-    """
     if state.get("validation_status") == "approved":
         return "parallel_agents"
-    elif state.get("validation_status") == "rejected":
-        return "__end__"
-    # If still pending, the graph will be interrupted here
     return "__end__"
 
 
 def qa_router(state: AnalyzerState) -> Literal["parallel_agents", "__end__"]:
-    """
-    QA validation routing.
-    If QA passes, go to END. If fails, loop back to parallel agents.
-    """
     if state.get("qa_pass", False):
         return "__end__"
-    else:
-        return "parallel_agents"
-
-
-# ══════════════════════════════════════════════════════════════════════
-# PARALLEL FAN-OUT NODE
-# ══════════════════════════════════════════════════════════════════════
+    return "parallel_agents"
 
 
 def parallel_agents_node(state: AnalyzerState) -> dict:
-    """
-    Runs all 5 sub-agents. In a production setup with LangGraph Cloud,
-    these would run as true parallel branches. For local execution,
-    they run sequentially but the architecture supports parallelization.
-    
-    Execution order matters for data dependencies:
-    1. Context (independent)
-    2. Capability (independent, but needed by Journey/Systems)
-    3. Journey (needs capability_output)
-    4. Systems (needs capability_output)
-    5. Financial (needs journey + capability + systems outputs)
-    """
+    """Sequential wrapper used by the legacy graph. New code uses v2 streaming."""
     results = {}
-
-    # Run context and capability first (independent)
-    context_result = context_node(state)
-    results.update(context_result)
-
-    capability_result = capability_node(state)
-    results.update(capability_result)
-
-    # Update state with capability output for dependent agents
+    results.update(context_node(state))
+    results.update(capability_node(state))
     updated_state = {**state, **results}
-
-    # Run journey and systems (depend on capability)
-    journey_result = journey_node(updated_state)
-    results.update(journey_result)
-
-    systems_result = systems_node(updated_state)
-    results.update(systems_result)
-
-    # Update state with all outputs for financial agent
+    results.update(journey_node(updated_state))
+    results.update(systems_node(updated_state))
     updated_state = {**state, **results}
-
-    # Run financial last (depends on journey + capability + systems)
-    financial_result = financial_node(updated_state)
-    results.update(financial_result)
-
+    results.update(financial_node(updated_state))
     return results
 
 
-# ══════════════════════════════════════════════════════════════════════
-# GRAPH COMPILATION
-# ══════════════════════════════════════════════════════════════════════
-
-
 def build_graph() -> StateGraph:
-    """
-    Build and compile the LangGraph state machine.
-    
-    Flow:
-    START → master_node → [HUMAN GATE] → parallel_agents → merge → qa_node → END
-                                                                      ↓
-                                                              (fail) → parallel_agents
-    """
     workflow = StateGraph(AnalyzerState)
-
-    # Add nodes
     workflow.add_node("master", master_node)
     workflow.add_node("parallel_agents", parallel_agents_node)
     workflow.add_node("merge", merge_node)
     workflow.add_node("qa_validation", qa_validation_node)
-
-    # Set entry point
     workflow.set_entry_point("master")
-
-    # Master → conditional routing based on validation_status
     workflow.add_conditional_edges(
-        "master",
-        validation_router,
-        {
-            "parallel_agents": "parallel_agents",
-            "__end__": END,
-        }
+        "master", validation_router,
+        {"parallel_agents": "parallel_agents", "__end__": END},
     )
-
-    # Parallel agents → merge
     workflow.add_edge("parallel_agents", "merge")
-
-    # Merge → QA validation
     workflow.add_edge("merge", "qa_validation")
-
-    # QA → conditional: pass goes to END, fail loops back
     workflow.add_conditional_edges(
-        "qa_validation",
-        qa_router,
-        {
-            "parallel_agents": "parallel_agents",
-            "__end__": END,
-        }
+        "qa_validation", qa_router,
+        {"parallel_agents": "parallel_agents", "__end__": END},
     )
-
     return workflow.compile()
 
 
-# Compiled graph instance — import this in main.py
 graph = build_graph()
 
 
 # ══════════════════════════════════════════════════════════════════════
-# EXECUTION HELPERS
+# MASTER EXTRACTION (step 1 of the UI flow)
 # ══════════════════════════════════════════════════════════════════════
 
+async def run_master_extraction(input_text: str, user_id: str) -> dict:
+    run_id = generate_run_id()
+    agent_logger.info(f"[{run_id}] === MASTER EXTRACTION (user={user_id}) ===")
+
+    initial_state = {
+        "input_text": input_text,
+        "user_id": user_id,
+        "core_assumptions": "",
+        "validation_status": "pending",
+        "context_output": "", "capability_output": "", "journey_output": "",
+        "systems_output": "", "financial_output": "",
+        "qa_feedback": "", "qa_pass": False, "final_output": "",
+        "_run_id": run_id,
+    }
+    result = await asyncio.to_thread(master_node, initial_state)
+    agent_logger.info(f"[{run_id}] === MASTER EXTRACTION COMPLETE ===")
+    return {
+        "core_assumptions": result["core_assumptions"],
+        "validation_status": "pending",
+    }
+
+
+# ══════════════════════════════════════════════════════════════════════
+# LEGACY SEQUENTIAL STREAMING (kept for backward compat)
+# ══════════════════════════════════════════════════════════════════════
 
 async def run_full_pipeline_streaming(
     input_text: str,
@@ -514,193 +414,264 @@ async def run_full_pipeline_streaming(
     core_assumptions: str,
     max_retries: int = 2,
 ):
-    """
-    Async generator that runs the full pipeline and yields SSE-ready event dicts
-    as each stage completes. Designed to be consumed by a StreamingResponse.
-
-    Events emitted:
-      {"type": "stage_start", "stage": str, "label": str, "attempt": int}
-      {"type": "stage_done",  "stage": str, "label": str, "duration_ms": int}
-      {"type": "qa_retry",    "attempt": int, "feedback": str}
-      {"type": "complete",    "qa_pass": bool, "qa_feedback": str,
-                              "attempts": int, "final_output": str}
-      {"type": "error",       "detail": str}
-    """
-    import asyncio
-    from app.agents.qa_agent import run_qa_validation
-
+    """Legacy sequential streaming pipeline. Still used by `/api/approve/stream`."""
     run_id = generate_run_id()
     agent_logger.info(f"[{run_id}] === STREAMING PIPELINE (user={user_id}) ===")
-
-    STAGES = [
-        ("context",    "Market Context & KPIs"),
-        ("capability", "Capability Design"),
-        ("journey",    "Journey Mapping"),
-        ("systems",    "Architecture & Systems"),
-        ("financial",  "Financial Analysis"),
-        ("merge",      "Compiling Report"),
-        ("qa",         "QA Validation"),
-    ]
 
     state = {
         "input_text": input_text,
         "user_id": user_id,
         "core_assumptions": core_assumptions,
         "validation_status": "approved",
-        "context_output": "",
-        "capability_output": "",
-        "journey_output": "",
-        "systems_output": "",
-        "financial_output": "",
-        "qa_feedback": "",
-        "qa_pass": False,
-        "final_output": "",
+        "context_output": "", "capability_output": "", "journey_output": "",
+        "systems_output": "", "financial_output": "",
+        "qa_feedback": "", "qa_pass": False, "final_output": "",
         "_run_id": run_id,
     }
 
+    seq = [
+        ("context", "Market Context & KPIs", context_node),
+        ("capability", "Capability Design", capability_node),
+        ("journey", "Journey Mapping", journey_node),
+        ("systems", "Architecture & Systems", systems_node),
+        ("financial", "Financial Analysis", financial_node),
+        ("merge", "Compiling Report", merge_node),
+    ]
+
     try:
         for attempt in range(max_retries + 1):
-            agent_logger.info(f"[{run_id}] Attempt {attempt + 1}/{max_retries + 1}")
+            for stage, label, fn in seq:
+                t0 = int(time.time() * 1000)
+                yield {"type": "stage_start", "stage": stage, "label": label, "attempt": attempt + 1}
+                await asyncio.sleep(0)
+                result = await asyncio.to_thread(fn, state)
+                state.update(result)
+                yield {"type": "stage_done", "stage": stage, "label": label,
+                       "duration_ms": int(time.time() * 1000) - t0}
+                await asyncio.sleep(0)
 
-            # ── Context ──────────────────────────────────────────────
-            t0 = int(time.time() * 1000)
-            yield {"type": "stage_start", "stage": "context", "label": "Market Context & KPIs", "attempt": attempt + 1}
-            await asyncio.sleep(0)  # flush event to client before blocking call
-            result = await asyncio.to_thread(context_node, state)
-            state.update(result)
-            yield {"type": "stage_done", "stage": "context", "label": "Market Context & KPIs", "duration_ms": int(time.time() * 1000) - t0}
-            await asyncio.sleep(0)
-
-            # ── Capability ───────────────────────────────────────────
-            t0 = int(time.time() * 1000)
-            yield {"type": "stage_start", "stage": "capability", "label": "Capability Design", "attempt": attempt + 1}
-            await asyncio.sleep(0)
-            result = await asyncio.to_thread(capability_node, state)
-            state.update(result)
-            yield {"type": "stage_done", "stage": "capability", "label": "Capability Design", "duration_ms": int(time.time() * 1000) - t0}
-            await asyncio.sleep(0)
-
-            # Update state snapshot for dependent agents
-            updated = dict(state)
-
-            # ── Journey ──────────────────────────────────────────────
-            t0 = int(time.time() * 1000)
-            yield {"type": "stage_start", "stage": "journey", "label": "Journey Mapping", "attempt": attempt + 1}
-            await asyncio.sleep(0)
-            result = await asyncio.to_thread(journey_node, updated)
-            state.update(result)
-            updated = dict(state)
-            yield {"type": "stage_done", "stage": "journey", "label": "Journey Mapping", "duration_ms": int(time.time() * 1000) - t0}
-            await asyncio.sleep(0)
-
-            # ── Systems ──────────────────────────────────────────────
-            t0 = int(time.time() * 1000)
-            yield {"type": "stage_start", "stage": "systems", "label": "Architecture & Systems", "attempt": attempt + 1}
-            await asyncio.sleep(0)
-            result = await asyncio.to_thread(systems_node, updated)
-            state.update(result)
-            updated = dict(state)
-            yield {"type": "stage_done", "stage": "systems", "label": "Architecture & Systems", "duration_ms": int(time.time() * 1000) - t0}
-            await asyncio.sleep(0)
-
-            # ── Financial ────────────────────────────────────────────
-            t0 = int(time.time() * 1000)
-            yield {"type": "stage_start", "stage": "financial", "label": "Financial Analysis", "attempt": attempt + 1}
-            await asyncio.sleep(0)
-            result = await asyncio.to_thread(financial_node, updated)
-            state.update(result)
-            yield {"type": "stage_done", "stage": "financial", "label": "Financial Analysis", "duration_ms": int(time.time() * 1000) - t0}
-            await asyncio.sleep(0)
-
-            # ── Merge ────────────────────────────────────────────────
-            t0 = int(time.time() * 1000)
-            yield {"type": "stage_start", "stage": "merge", "label": "Compiling Report", "attempt": attempt + 1}
-            await asyncio.sleep(0)
-            result = await asyncio.to_thread(merge_node, state)
-            state.update(result)
-            yield {"type": "stage_done", "stage": "merge", "label": "Compiling Report", "duration_ms": int(time.time() * 1000) - t0}
-            await asyncio.sleep(0)
-
-            # ── QA ───────────────────────────────────────────────────
             t0 = int(time.time() * 1000)
             yield {"type": "stage_start", "stage": "qa", "label": "QA Validation", "attempt": attempt + 1}
             await asyncio.sleep(0)
-            qa_result = await asyncio.to_thread(run_qa_validation, state["final_output"])
-            yield {"type": "stage_done", "stage": "qa", "label": "QA Validation", "duration_ms": int(time.time() * 1000) - t0}
+            qa_result = await asyncio.to_thread(run_qa_validation, state["final_output"], user_id)
+            yield {"type": "stage_done", "stage": "qa", "label": "QA Validation",
+                   "duration_ms": int(time.time() * 1000) - t0}
             await asyncio.sleep(0)
 
             if qa_result["qa_pass"]:
-                agent_logger.info(f"[{run_id}] QA PASSED on attempt {attempt + 1}")
-                yield {
-                    "type": "complete",
-                    "qa_pass": True,
-                    "qa_feedback": "",
-                    "attempts": attempt + 1,
-                    "final_output": state["final_output"],
-                }
+                yield {"type": "complete", "qa_pass": True, "qa_feedback": "",
+                       "attempts": attempt + 1, "final_output": state["final_output"]}
                 return
-            else:
-                agent_logger.warning(f"[{run_id}] QA FAILED on attempt {attempt + 1}")
-                state["qa_feedback"] = qa_result["qa_feedback"]
-                if attempt < max_retries:
-                    yield {
-                        "type": "qa_retry",
-                        "attempt": attempt + 1,
-                        "feedback": qa_result["qa_feedback"][:300],
-                    }
-                    state["input_text"] = (
-                        input_text
-                        + f"\n\n--- QA CORRECTION REQUIRED (Attempt {attempt + 2}) ---\n"
-                        + qa_result["qa_feedback"]
-                        + "\nFix the above violations in your output."
-                    )
 
-        # All retries exhausted
-        yield {
-            "type": "complete",
-            "qa_pass": False,
-            "qa_feedback": state["qa_feedback"],
-            "attempts": max_retries + 1,
-            "final_output": state["final_output"],
-        }
+            state["qa_feedback"] = qa_result["qa_feedback"]
+            if attempt < max_retries:
+                yield {"type": "qa_retry", "attempt": attempt + 1,
+                       "feedback": qa_result["qa_feedback"][:300]}
+                state["input_text"] = (
+                    input_text
+                    + f"\n\n--- QA CORRECTION REQUIRED (Attempt {attempt + 2}) ---\n"
+                    + qa_result["qa_feedback"] + "\nFix the above violations in your output."
+                )
+
+        yield {"type": "complete", "qa_pass": False, "qa_feedback": state["qa_feedback"],
+               "attempts": max_retries + 1, "final_output": state["final_output"]}
     except Exception as e:
         agent_logger.error(f"[{run_id}] Streaming pipeline error: {e}")
         yield {"type": "error", "detail": str(e)}
 
 
-async def run_master_extraction(input_text: str, user_id: str) -> dict:
+# ══════════════════════════════════════════════════════════════════════
+# WAVE-PARALLEL STREAMING V2 (used by the new /api/analyze/start endpoint)
+# ══════════════════════════════════════════════════════════════════════
+
+STAGE_LABELS = {
+    "context": "Market Context & KPIs",
+    "capability": "Capability Design",
+    "journey": "Journey Mapping",
+    "systems": "Architecture & Systems",
+    "financial": "Financial Analysis",
+    "merge": "Compiling Report",
+    "qa": "QA Validation",
+}
+
+STAGE_OUTPUT_KEY = {
+    "context": "context_output",
+    "capability": "capability_output",
+    "journey": "journey_output",
+    "systems": "systems_output",
+    "financial": "financial_output",
+    "merge": "final_output",
+}
+
+
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+
+
+async def _run_wave(
+    stages: list[tuple[str, Callable[[dict], dict]]],
+    state: dict,
+    attempt: int,
+) -> AsyncIterator[dict]:
     """
-    Step 1: Run the master agent to extract core assumptions.
-    Returns the assumptions for human review.
+    Launch all stages in a wave concurrently via `asyncio.to_thread` and yield
+    events (`stage_start` up front, then `stage_done` + `stage_output` in the
+    order they actually finish). Mutates `state` in place.
+    """
+    for stage, _fn in stages:
+        yield {
+            "type": "stage_start",
+            "stage": stage,
+            "label": STAGE_LABELS.get(stage, stage),
+            "attempt": attempt,
+            "started_at": _now_iso(),
+        }
+
+    async def _run_one(stage: str, fn: Callable[[dict], dict]) -> dict:
+        t0 = int(time.time() * 1000)
+        result = await asyncio.to_thread(fn, state)
+        return {
+            "stage": stage,
+            "duration_ms": int(time.time() * 1000) - t0,
+            "result": result,
+        }
+
+    tasks = [asyncio.create_task(_run_one(s, fn)) for s, fn in stages]
+    for coro in asyncio.as_completed(tasks):
+        info = await coro
+        state.update(info["result"])
+        stage = info["stage"]
+        yield {
+            "type": "stage_done",
+            "stage": stage,
+            "label": STAGE_LABELS.get(stage, stage),
+            "duration_ms": info["duration_ms"],
+        }
+        output_key = STAGE_OUTPUT_KEY.get(stage)
+        if output_key and state.get(output_key):
+            yield {
+                "type": "stage_output",
+                "stage": stage,
+                "markdown": state[output_key],
+            }
+
+
+async def run_full_pipeline_streaming_v2(
+    *,
+    user_id: str,
+    analysis_id: str,
+    input_text: str,
+    core_assumptions: str,
+    max_retries: int = 2,
+) -> AsyncIterator[dict]:
+    """
+    Wave-parallel streaming pipeline.
+
+    Waves:
+      1. context ‖ capability                 (truly concurrent)
+      2. journey ‖ systems                    (both depend on capability_output)
+      3. financial                            (depends on the prior three)
+      4. merge → qa                           (sequential finishers)
+
+    On QA failure, loops back to wave 1 with the feedback appended.
     """
     run_id = generate_run_id()
-    agent_logger.info(f"[{run_id}] === PIPELINE STEP 1: Master Extraction (user={user_id}) ===")
+    agent_logger.info(
+        f"[{run_id}] === V2 STREAMING (user={user_id} analysis={analysis_id}) ==="
+    )
 
-    initial_state = {
+    state = {
         "input_text": input_text,
         "user_id": user_id,
-        "core_assumptions": "",
-        "validation_status": "pending",
-        "context_output": "",
-        "capability_output": "",
-        "journey_output": "",
-        "systems_output": "",
-        "financial_output": "",
-        "qa_feedback": "",
-        "qa_pass": False,
-        "final_output": "",
+        "core_assumptions": core_assumptions,
+        "validation_status": "approved",
+        "context_output": "", "capability_output": "", "journey_output": "",
+        "systems_output": "", "financial_output": "",
+        "qa_feedback": "", "qa_pass": False, "final_output": "",
         "_run_id": run_id,
     }
 
-    # Run just the master node
-    result = master_node(initial_state)
+    try:
+        for attempt in range(max_retries + 1):
+            attempt_num = attempt + 1
+            agent_logger.info(f"[{run_id}] Attempt {attempt_num}/{max_retries + 1}")
 
-    agent_logger.info(f"[{run_id}] === PIPELINE STEP 1 COMPLETE ===")
-    return {
-        "core_assumptions": result["core_assumptions"],
-        "validation_status": "pending",
-    }
+            # Wave 1 — context ‖ capability
+            async for ev in _run_wave(
+                [("context", context_node), ("capability", capability_node)],
+                state, attempt_num,
+            ):
+                yield ev
 
+            # Wave 2 — journey ‖ systems (now that capability_output is set)
+            async for ev in _run_wave(
+                [("journey", journey_node), ("systems", systems_node)],
+                state, attempt_num,
+            ):
+                yield ev
+
+            # Wave 3 — financial
+            async for ev in _run_wave(
+                [("financial", financial_node)],
+                state, attempt_num,
+            ):
+                yield ev
+
+            # Wave 4a — merge
+            async for ev in _run_wave(
+                [("merge", merge_node)],
+                state, attempt_num,
+            ):
+                yield ev
+
+            # Wave 4b — QA (separate because it has custom pass/fail logic)
+            t0 = int(time.time() * 1000)
+            yield {
+                "type": "stage_start", "stage": "qa",
+                "label": STAGE_LABELS["qa"],
+                "attempt": attempt_num, "started_at": _now_iso(),
+            }
+            qa_result = await asyncio.to_thread(run_qa_validation, state["final_output"], user_id)
+            yield {
+                "type": "stage_done", "stage": "qa",
+                "label": STAGE_LABELS["qa"],
+                "duration_ms": int(time.time() * 1000) - t0,
+            }
+
+            if qa_result["qa_pass"]:
+                yield {
+                    "type": "complete", "qa_pass": True, "qa_feedback": "",
+                    "attempts": attempt_num, "final_output": state["final_output"],
+                }
+                return
+
+            state["qa_feedback"] = qa_result["qa_feedback"]
+            if attempt < max_retries:
+                yield {
+                    "type": "qa_retry", "attempt": attempt_num,
+                    "feedback": qa_result["qa_feedback"][:300],
+                }
+                state["input_text"] = (
+                    input_text
+                    + f"\n\n--- QA CORRECTION REQUIRED (Attempt {attempt_num + 1}) ---\n"
+                    + qa_result["qa_feedback"]
+                    + "\nFix the above violations in your output."
+                )
+
+        yield {
+            "type": "complete", "qa_pass": False,
+            "qa_feedback": state["qa_feedback"],
+            "attempts": max_retries + 1,
+            "final_output": state["final_output"],
+        }
+    except Exception as e:
+        agent_logger.error(f"[{run_id}] V2 streaming error: {e}")
+        yield {"type": "error", "detail": str(e)}
+
+
+# ══════════════════════════════════════════════════════════════════════
+# SYNCHRONOUS FULL PIPELINE (kept for parity with previous API)
+# ══════════════════════════════════════════════════════════════════════
 
 async def run_full_pipeline(
     input_text: str,
@@ -708,16 +679,9 @@ async def run_full_pipeline(
     core_assumptions: str,
     max_retries: int = 2,
 ) -> dict:
-    """
-    Step 2: Run the full pipeline after human approval.
-    Executes parallel agents → merge → QA validation → returns final output.
-    If QA fails, retries up to max_retries times.
-    """
-    from app.agents.qa_agent import run_qa_validation
-
     run_id = generate_run_id()
     agent_logger.info(
-        f"[{run_id}] === PIPELINE STEP 2: Full Analysis (user={user_id}, max_retries={max_retries}) ==="
+        f"[{run_id}] === FULL PIPELINE (user={user_id}, max_retries={max_retries}) ==="
     )
 
     state = {
@@ -725,63 +689,36 @@ async def run_full_pipeline(
         "user_id": user_id,
         "core_assumptions": core_assumptions,
         "validation_status": "approved",
-        "context_output": "",
-        "capability_output": "",
-        "journey_output": "",
-        "systems_output": "",
-        "financial_output": "",
-        "qa_feedback": "",
-        "qa_pass": False,
-        "final_output": "",
+        "context_output": "", "capability_output": "", "journey_output": "",
+        "systems_output": "", "financial_output": "",
+        "qa_feedback": "", "qa_pass": False, "final_output": "",
         "_run_id": run_id,
     }
 
     for attempt in range(max_retries + 1):
-        agent_logger.info(f"[{run_id}] Attempt {attempt + 1}/{max_retries + 1} — running parallel agents")
-
-        # Run parallel agents
-        agent_results = parallel_agents_node(state)
+        agent_results = await asyncio.to_thread(parallel_agents_node, state)
         state.update(agent_results)
 
-        # Run merge
-        agent_logger.info(f"[{run_id}] Merging agent outputs")
-        merge_result = merge_node(state)
+        merge_result = await asyncio.to_thread(merge_node, state)
         state.update(merge_result)
 
-        # Run QA validation
-        agent_logger.info(f"[{run_id}] Running QA validation")
-        qa_result = run_qa_validation(state["final_output"])
+        qa_result = await asyncio.to_thread(run_qa_validation, state["final_output"], user_id)
 
         if qa_result["qa_pass"]:
-            agent_logger.info(
-                f"[{run_id}] QA PASSED on attempt {attempt + 1} — pipeline complete"
-            )
             return {
                 "final_output": state["final_output"],
-                "qa_pass": True,
-                "qa_feedback": "",
+                "qa_pass": True, "qa_feedback": "",
                 "attempts": attempt + 1,
             }
-        else:
-            agent_logger.warning(
-                f"[{run_id}] QA FAILED on attempt {attempt + 1}: {qa_result['qa_feedback'][:200]}"
-            )
-            # Update state with QA feedback for retry
-            state["qa_feedback"] = qa_result["qa_feedback"]
-            if attempt < max_retries:
-                agent_logger.info(f"[{run_id}] Retrying with QA feedback appended")
-                # Append QA feedback to input so agents can correct
-                state["input_text"] = (
-                    input_text
-                    + f"\n\n--- QA CORRECTION REQUIRED (Attempt {attempt + 2}) ---\n"
-                    + qa_result["qa_feedback"]
-                    + "\nFix the above violations in your output."
-                )
 
-    # If all retries exhausted, return with QA feedback
-    agent_logger.error(
-        f"[{run_id}] Pipeline FAILED after {max_retries + 1} attempts — returning last output with QA feedback"
-    )
+        state["qa_feedback"] = qa_result["qa_feedback"]
+        if attempt < max_retries:
+            state["input_text"] = (
+                input_text
+                + f"\n\n--- QA CORRECTION REQUIRED (Attempt {attempt + 2}) ---\n"
+                + qa_result["qa_feedback"] + "\nFix the above violations in your output."
+            )
+
     return {
         "final_output": state["final_output"],
         "qa_pass": False,

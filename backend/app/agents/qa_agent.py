@@ -14,10 +14,9 @@ using regex patterns before calling the LLM, to catch obvious violations cheaply
 """
 
 import re
-import os
 import time
+from typing import Optional
 from dotenv import load_dotenv
-from langchain_anthropic import ChatAnthropic
 from langchain_core.prompts import ChatPromptTemplate
 
 load_dotenv()
@@ -156,12 +155,16 @@ def rule_based_precheck(compiled_output: str) -> dict:
 # ══════════════════════════════════════════════════════════════════════
 
 
-def run_qa_validation(compiled_output: str) -> dict:
+def run_qa_validation(compiled_output: str, user_id: Optional[str] = None) -> dict:
     """
     Run the full QA validation pipeline:
     1. Rule-based pre-check (fast, catches obvious violations)
     2. LLM-based deep check (thorough, catches subtle violations)
-    
+
+    `user_id`, when provided, loads the QA agent's per-user config (model,
+    API key, Skills.md). If omitted, falls back to the server's Anthropic
+    defaults so legacy call sites keep working.
+
     Returns:
         {
             "qa_pass": bool,
@@ -183,15 +186,19 @@ def run_qa_validation(compiled_output: str) -> dict:
 
     # Step 2: LLM-based deep validation
     try:
-        llm = ChatAnthropic(
-            model="claude-sonnet-4-20250514",
-            anthropic_api_key=os.getenv("ANTHROPIC_API_KEY"),
-            temperature=0.0,
-            max_tokens=2048,
-            max_retries=3,
-        )
-
-        chain = QA_VALIDATION_PROMPT | llm
+        from app.agent_config import load_agent_config, build_llm, compose_prompt
+        if user_id:
+            cfg = load_agent_config(user_id, "qa")
+        else:
+            # Fallback to defaults when user context isn't available.
+            from app.agent_config import AgentConfig
+            cfg = AgentConfig(
+                agent_name="qa", provider="anthropic",
+                model="claude-sonnet-4-20250514",
+                temperature=0.0, max_tokens=2048,
+            )
+        llm = build_llm(cfg)
+        chain = compose_prompt(QA_VALIDATION_PROMPT, cfg.skills_md) | llm
 
         # Retry with exponential backoff on 529/429 errors
         response = None
@@ -258,7 +265,7 @@ def qa_validation_node(state: dict) -> dict:
             "qa_feedback": "No compiled output to validate.",
         }
 
-    result = run_qa_validation(compiled_output)
+    result = run_qa_validation(compiled_output, state.get("user_id"))
 
     return {
         "qa_pass": result["qa_pass"],

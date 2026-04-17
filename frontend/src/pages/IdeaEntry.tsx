@@ -4,11 +4,15 @@ import {
   RotateCcw, Building2, Briefcase, Globe, ChevronRight, Upload,
   Pencil, Trash2, RefreshCw, Sparkles, ShieldCheck, History,
   BarChart3, Layers, Route, Server, DollarSign, GitMerge, ShieldQuestion, Loader2,
+  FileText, FileCode, FileType,
+  Share2, FileDown, FileCode2, Printer,
 } from 'lucide-react';
 import { Layout } from '../components/Layout';
 import { ReportDashboard } from '../components/ReportDashboard';
 import { useAuth } from '../contexts/AuthContext';
 import { cn } from '../lib/utils';
+import { startAnalysis, subscribeAnalysis, exportUrl, getAnalysis } from '../lib/apiClient';
+import type { AnalysisEvent, StageName } from '../types';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -137,10 +141,18 @@ export const IdeaEntry: React.FC = () => {
   const [pipelineStages, setPipelineStages] = useState<PipelineStage[]>(PIPELINE_STAGE_DEFS);
   const readerRef = useRef<ReadableStreamDefaultReader<Uint8Array> | null>(null);
 
-  // Pre-populate from user profile
+  // Persistent analysis id — survives navigation via sessionStorage
+  const [analysisId, setAnalysisId] = useState<string | null>(null);
+  const sseUnsubRef = useRef<(() => void) | null>(null);
+  // Progressive per-stage Markdown accumulated from `stage_output` events
+  const [stageOutputs, setStageOutputs] = useState<Record<string, string>>({});
+
+  const SESSION_KEY = profile?.uid ? `bca:activeAnalysis:${profile.uid}` : null;
+
+  // Pre-populate from user profile (with Technology as sensible default)
   useEffect(() => {
     if (profile) {
-      if (profile.industry && !industry) setIndustry(profile.industry);
+      if (!industry) setIndustry(profile.industry || 'Technology');
       if (profile.consultant_name && !consultingCompany) setConsultingCompany(profile.consultant_name);
       if (profile.client_company && !clientCompany) setClientCompany(profile.client_company);
     }
@@ -202,15 +214,64 @@ export const IdeaEntry: React.FC = () => {
     }
   };
 
-  // ─── Step 2: POST /api/approve/stream ────────────────────────────────
+  // ─── Event dispatcher — shared by fresh-start and reconnect paths ────
+
+  const applyEvent = (event: AnalysisEvent) => {
+    if (event.type === 'stage_start') {
+      setPipelineStages(prev => prev.map(s =>
+        s.stage === event.stage
+          ? { ...s, status: 'running', startedAt: Date.now(), attempt: event.attempt }
+          : s
+      ));
+    } else if (event.type === 'stage_done') {
+      setPipelineStages(prev => prev.map(s =>
+        s.stage === event.stage
+          ? { ...s, status: 'done', duration: event.duration_ms }
+          : s
+      ));
+    } else if (event.type === 'stage_output') {
+      setStageOutputs(prev => ({ ...prev, [event.stage]: event.markdown }));
+    } else if (event.type === 'qa_retry') {
+      // QA failed — retry loop reruns the agents; reset stage cards and outputs.
+      setPipelineStages(PIPELINE_STAGE_DEFS);
+      setStageOutputs({});
+    } else if (event.type === 'complete') {
+      setFinalOutput(event.final_output);
+      setQaPass(event.qa_pass);
+      setQaFeedback(event.qa_feedback || '');
+      setAttempts(event.attempts || 1);
+      setPhase('result');
+      if (SESSION_KEY) sessionStorage.removeItem(SESSION_KEY);
+    } else if (event.type === 'error') {
+      setError(event.detail);
+      setPhase('error');
+      if (SESSION_KEY) sessionStorage.removeItem(SESSION_KEY);
+    }
+  };
+
+  const openStream = async (id: string) => {
+    const token = await getIdToken();
+    if (!token) throw new Error('Not authenticated. Please log in again.');
+    // Close any prior subscription before opening a new one.
+    sseUnsubRef.current?.();
+    sseUnsubRef.current = subscribeAnalysis(id, token, {
+      onEvent: applyEvent,
+      onError: () => {
+        setError('Lost connection to the analysis stream. The background job may still be running — reload the page to resume.');
+        setPhase('error');
+      },
+    });
+  };
+
+  // ─── Step 2: POST /api/analyze/start + SSE ──────────────────────────
 
   const handleApprove = async () => {
     setPhase('generating');
     setError(null);
     setIdeaSummary(null);
     setPipelineStages(PIPELINE_STAGE_DEFS);
+    setStageOutputs({});
 
-    // Ensure the generating phase UI paints before the SSE fetch starts
     await new Promise<void>(r => requestAnimationFrame(() => requestAnimationFrame(() => r())));
 
     try {
@@ -219,91 +280,30 @@ export const IdeaEntry: React.FC = () => {
 
       const inputText = composeInputText();
 
-      // Fire AI summary in parallel (non-critical — failures silently ignored)
+      // Fire AI summary in parallel (best-effort, non-critical).
       fetch('/api/summarize', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({ input_text: inputText, core_assumptions: coreAssumptions }),
       })
         .then(r => r.ok ? r.json() : null)
         .then(data => { if (data?.summary) setIdeaSummary(data.summary); })
         .catch(() => null);
 
-      const res = await fetch('/api/approve/stream', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({
-          input_text: inputText,
-          core_assumptions: coreAssumptions,
-          approved: true,
-        }),
-      });
+      const { analysis_id } = await startAnalysis({
+        input_text: inputText,
+        core_assumptions: coreAssumptions,
+        industry,
+        consulting_company: consultingCompany,
+        client_company: clientCompany,
+        problem_statement: problemStatement,
+      }, getIdToken);
 
-      if (!res.ok) {
-        const errData = await res.json().catch(() => ({}));
-        throw new Error(errData.detail || `Pipeline failed (${res.status})`);
-      }
+      setAnalysisId(analysis_id);
+      if (SESSION_KEY) sessionStorage.setItem(SESSION_KEY, analysis_id);
 
-      if (!res.body) throw new Error('No response body from server.');
-
-      const reader = res.body.getReader();
-      readerRef.current = reader;
-      const decoder = new TextDecoder();
-      let buffer = '';
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-
-        // Parse complete SSE lines from the buffer
-        const lines = buffer.split('\n');
-        buffer = lines.pop() ?? ''; // keep incomplete last chunk
-
-        for (const line of lines) {
-          if (!line.startsWith('data: ')) continue;
-          let event: any;
-          try { event = JSON.parse(line.slice(6)); } catch { continue; }
-
-          if (event.type === 'stage_start') {
-            setPipelineStages(prev => prev.map(s =>
-              s.stage === event.stage
-                ? { ...s, status: 'running', startedAt: Date.now(), attempt: event.attempt }
-                : s
-            ));
-            // Yield to React so the "running" state is rendered before the next event
-            await new Promise(r => setTimeout(r, 0));
-          } else if (event.type === 'stage_done') {
-            setPipelineStages(prev => prev.map(s =>
-              s.stage === event.stage
-                ? { ...s, status: 'done', duration: event.duration_ms }
-                : s
-            ));
-            await new Promise(r => setTimeout(r, 0));
-          } else if (event.type === 'qa_retry') {
-            // Reset all stages for retry
-            setPipelineStages(PIPELINE_STAGE_DEFS);
-            await new Promise(r => setTimeout(r, 0));
-          } else if (event.type === 'complete') {
-            setFinalOutput(event.final_output);
-            setQaPass(event.qa_pass);
-            setQaFeedback(event.qa_feedback || '');
-            setAttempts(event.attempts || 1);
-            setPhase('result');
-          } else if (event.type === 'error') {
-            throw new Error(event.detail);
-          }
-        }
-      }
+      await openStream(analysis_id);
     } catch (err: any) {
-      // "Failed to fetch" is the browser's generic message when it can't reach the server at all.
-      // Translate it into something actionable for the user.
       const raw: string = err?.message || '';
       let message = raw;
       if (
@@ -321,13 +321,289 @@ export const IdeaEntry: React.FC = () => {
     }
   };
 
+  // Resume a prior analysis if the user navigated away mid-run.
+  useEffect(() => {
+    if (!SESSION_KEY || phase !== 'input') return;
+    const saved = sessionStorage.getItem(SESSION_KEY);
+    if (!saved) return;
+
+    let cancelled = false;
+    (async () => {
+      try {
+        const doc = await getAnalysis(saved, getIdToken);
+        if (cancelled) return;
+        if (doc.status === 'completed') {
+          setAnalysisId(doc.analysis_id);
+          setFinalOutput(doc.final_output);
+          setQaPass(doc.qa_pass);
+          setQaFeedback(doc.qa_feedback || '');
+          setAttempts(doc.attempts || 1);
+          if (doc.industry) setIndustry(doc.industry);
+          if (doc.consulting_company) setConsultingCompany(doc.consulting_company);
+          if (doc.client_company) setClientCompany(doc.client_company);
+          if (doc.problem_statement) setProblemStatement(doc.problem_statement);
+          if (doc.core_assumptions) setCoreAssumptions(doc.core_assumptions);
+          setPhase('result');
+          sessionStorage.removeItem(SESSION_KEY);
+        } else if (doc.status === 'running' || doc.status === 'queued') {
+          // Re-attach to a live run: seed stage state from persisted sub-docs.
+          setAnalysisId(doc.analysis_id);
+          if (doc.industry) setIndustry(doc.industry);
+          if (doc.consulting_company) setConsultingCompany(doc.consulting_company);
+          if (doc.client_company) setClientCompany(doc.client_company);
+          if (doc.problem_statement) setProblemStatement(doc.problem_statement);
+          if (doc.core_assumptions) setCoreAssumptions(doc.core_assumptions);
+          const seededOutputs: Record<string, string> = {};
+          const seededStages = PIPELINE_STAGE_DEFS.map(s => {
+            const sub = (doc.stages as Record<string, any>)[s.stage];
+            if (sub?.output) seededOutputs[s.stage] = sub.output;
+            if (sub?.status === 'done') {
+              return { ...s, status: 'done' as const, duration: sub.duration_ms };
+            }
+            if (sub?.status === 'running') {
+              return { ...s, status: 'running' as const, attempt: sub.attempt };
+            }
+            return s;
+          });
+          setPipelineStages(seededStages);
+          setStageOutputs(seededOutputs);
+          setPhase('generating');
+          await openStream(doc.analysis_id);
+        } else {
+          sessionStorage.removeItem(SESSION_KEY);
+        }
+      } catch {
+        // Saved id no longer valid — silently drop it.
+        sessionStorage.removeItem(SESSION_KEY);
+      }
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [SESSION_KEY]);
+
+  // Ensure SSE subscription is torn down on unmount.
+  useEffect(() => () => { sseUnsubRef.current?.(); }, []);
+
   const handleReject = () => {
     setPhase('input');
     setCoreAssumptions('');
   };
 
+  const handleExport = async (kind: 'pdf' | 'html' | 'markdown') => {
+    if (!analysisId) return;
+    try {
+      const token = await getIdToken();
+      if (!token) throw new Error('Not authenticated.');
+      window.open(exportUrl(analysisId, kind, token), '_blank', 'noopener,noreferrer');
+    } catch (err: any) {
+      setError(err?.message || `Failed to export ${kind}.`);
+    }
+  };
+
+  const [showExportMenu, setShowExportMenu] = useState(false);
+
+  const escapeHtml = (s: string): string =>
+    s
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+
+  const buildHtmlExport = (): string => {
+    const md = finalOutput;
+    const lines = md.split('\n');
+    const out: string[] = [];
+
+    let inList = false;
+    let inTable = false;
+
+    const flushList = () => {
+      if (inList) { out.push('</ul>'); inList = false; }
+    };
+    const flushTable = () => {
+      if (inTable) { out.push('</tbody></table>'); inTable = false; }
+    };
+
+    const inline = (s: string): string => {
+      let t = escapeHtml(s);
+      t = t.replace(/\*\*\*(.+?)\*\*\*/g, '<strong><em>$1</em></strong>');
+      t = t.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+      t = t.replace(/\*(.+?)\*/g, '<em>$1</em>');
+      t = t.replace(/`([^`]+)`/g, '<code>$1</code>');
+      return t;
+    };
+
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i].trimEnd();
+
+      // Table row
+      if (line.startsWith('|') && line.endsWith('|') && line.length > 1) {
+        const inner = line.slice(1, -1);
+        if (/^[-:| ]+$/.test(inner)) { continue; } // separator row
+        const cells = inner.split('|').map(c => c.trim());
+        flushList();
+        if (!inTable) {
+          out.push('<table><thead><tr>');
+          cells.forEach(c => out.push(`<th>${inline(c)}</th>`));
+          out.push('</tr></thead><tbody>');
+          inTable = true;
+        } else {
+          out.push('<tr>');
+          cells.forEach(c => out.push(`<td>${inline(c)}</td>`));
+          out.push('</tr>');
+        }
+        continue;
+      } else if (inTable) {
+        flushTable();
+      }
+
+      // Fenced code block opener
+      if (line.startsWith('```')) {
+        flushList();
+        out.push('<hr />');
+        continue;
+      }
+
+      // Horizontal rule
+      if (/^-{3,}$/.test(line)) {
+        flushList();
+        out.push('<hr />');
+        continue;
+      }
+
+      // Headings
+      const h = line.match(/^(#{1,6})\s+(.+)$/);
+      if (h) {
+        flushList();
+        const level = h[1].length;
+        out.push(`<h${level}>${inline(h[2])}</h${level}>`);
+        continue;
+      }
+
+      // Bullet lists
+      const b = line.match(/^[-*+]\s+(.+)$/);
+      if (b) {
+        if (!inList) { out.push('<ul>'); inList = true; }
+        out.push(`<li>${inline(b[1])}</li>`);
+        continue;
+      } else if (inList) {
+        flushList();
+      }
+
+      // Blank line
+      if (line === '') {
+        out.push('<br />');
+        continue;
+      }
+
+      // Fallback paragraph
+      out.push(`<p>${inline(line)}</p>`);
+    }
+
+    flushList();
+    flushTable();
+
+    const generated = new Date().toLocaleString();
+    const title = `${escapeHtml(clientCompany)} — ${escapeHtml(industry)} — Business Capability Analysis`;
+
+    return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>${title}</title>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; color: #1e293b; max-width: 960px; margin: 2rem auto; padding: 0 1.5rem; line-height: 1.6; }
+  h1 { border-bottom: 3px solid #4648d4; padding-bottom: 0.4em; color: #141b2c; }
+  h2 { border-left: 4px solid #4648d4; padding-left: 0.6em; color: #141b2c; margin-top: 2em; }
+  h3, h4, h5, h6 { color: #141b2c; margin-top: 1.5em; }
+  p { margin: 0.5em 0; }
+  ul { padding-left: 1.5em; }
+  li { margin: 0.3em 0; }
+  hr { border: 0; border-top: 1px solid #e2e8f0; margin: 1.5em 0; }
+  code { background: #f1f5f9; padding: 0.15em 0.4em; border-radius: 4px; font-family: "SF Mono", Menlo, Consolas, monospace; font-size: 0.92em; }
+  table { border-collapse: collapse; width: 100%; margin: 1em 0; font-size: 0.95em; }
+  th { background: #4648d4; color: #fff; text-align: left; padding: 0.6em 0.8em; font-weight: 600; }
+  td { padding: 0.5em 0.8em; border-bottom: 1px solid #e2e8f0; vertical-align: top; }
+  tbody tr:nth-child(odd) { background: #ffffff; }
+  tbody tr:nth-child(even) { background: #f8fafc; }
+  .metadata { background: #f1f3ff; border-left: 4px solid #4648d4; padding: 1em 1.2em; margin-bottom: 2em; border-radius: 4px; font-size: 0.9em; }
+  .metadata strong { color: #4648d4; }
+  @media print {
+    body { max-width: 100%; margin: 0; padding: 0.5in; }
+    h1, h2, h3 { page-break-after: avoid; }
+    table, tr { page-break-inside: avoid; }
+    .metadata { background: #f1f3ff !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    th { background: #4648d4 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  }
+</style>
+</head>
+<body>
+<div class="metadata">
+  <div><strong>Generated:</strong> ${escapeHtml(generated)}</div>
+  <div><strong>Industry:</strong> ${escapeHtml(industry)}</div>
+  <div><strong>Consulting Company:</strong> ${escapeHtml(consultingCompany)}</div>
+  <div><strong>Client Company:</strong> ${escapeHtml(clientCompany)}</div>
+</div>
+${out.join('\n')}
+</body>
+</html>`;
+  };
+
+  const exportFilename = (ext: string): string => {
+    const slug = [clientCompany, industry, 'report']
+      .filter(Boolean)
+      .map(s => s.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, ''))
+      .filter(Boolean)
+      .join('-');
+    return `${slug || 'analysis'}.${ext}`;
+  };
+
+  const handleExportMarkdown = () => {
+    const blob = new Blob([finalOutput], { type: 'text/markdown' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = exportFilename('md');
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    setShowExportMenu(false);
+  };
+
+  const handleExportHTML = () => {
+    const blob = new Blob([buildHtmlExport()], { type: 'text/html' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = exportFilename('html');
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    setShowExportMenu(false);
+  };
+
+  const handlePrintPDF = () => {
+    const win = window.open('', '_blank');
+    if (!win) {
+      alert('Please allow pop-ups for this site so we can open the print dialog.');
+      return;
+    }
+    win.document.open();
+    win.document.write(buildHtmlExport());
+    win.document.close();
+    setTimeout(() => { win.print(); }, 600);
+    setShowExportMenu(false);
+  };
+
   const handleReset = () => {
     readerRef.current?.cancel();
+    sseUnsubRef.current?.();
+    sseUnsubRef.current = null;
+    if (SESSION_KEY) sessionStorage.removeItem(SESSION_KEY);
+    setAnalysisId(null);
+    setStageOutputs({});
     setPhase('input');
     setCoreAssumptions('');
     setFinalOutput('');
@@ -540,9 +816,30 @@ export const IdeaEntry: React.FC = () => {
           ))}
         </div>
 
+        {/* Progressive preview — render whatever stage outputs have arrived */}
+        {Object.keys(stageOutputs).length > 0 && (() => {
+          const order: StageName[] = ['context', 'capability', 'journey', 'systems', 'financial'];
+          const chunks = order.map(k => stageOutputs[k] || '').filter(Boolean);
+          if (!chunks.length) return null;
+          const partial = '# Business Capability Analysis Report\n\n---\n\n' + chunks.join('\n\n---\n\n');
+          return (
+            <div className="mt-8 bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+              <div className="px-5 py-3 bg-slate-50 border-b border-slate-200 flex items-center gap-2">
+                <Sparkles className="w-4 h-4 text-accent-600" />
+                <span className="text-xs font-bold uppercase tracking-wider text-slate-600">Live Preview</span>
+                <span className="text-[10px] text-slate-400 ml-auto">Rendering as each agent finishes</span>
+              </div>
+              <div className="p-4 max-h-[60vh] overflow-y-auto">
+                <ReportDashboard markdown={partial} />
+              </div>
+            </div>
+          );
+        })()}
+
         {/* Note */}
         <p className="text-center text-xs text-slate-400">
           Each agent calls the AI model independently — this takes 2–4 minutes total.
+          You can navigate away — the analysis continues in the background.
         </p>
       </div>
     );
@@ -653,27 +950,22 @@ export const IdeaEntry: React.FC = () => {
                 />
               </div>
 
-              {/* Industry Category — pill selector */}
+              {/* Industry Category — dropdown with sensible default */}
               <div className="space-y-2 md:col-span-2">
                 <label className="block text-[10px] text-slate-500 font-bold uppercase tracking-widest">
                   Industry Category
                 </label>
-                <div className="flex flex-wrap gap-2 pt-2">
-                  {INDUSTRY_OPTIONS.map(opt => (
-                    <button
-                      key={opt}
-                      type="button"
-                      onClick={() => setIndustry(opt)}
-                      className={cn(
-                        'px-4 py-1.5 rounded-full text-xs font-semibold cursor-pointer transition-colors',
-                        industry === opt
-                          ? 'bg-[#007bb5] text-white'
-                          : 'bg-[#dbe2f9] text-[#5c6477] hover:bg-[#007bb5] hover:text-white',
-                      )}
-                    >
-                      {opt}
-                    </button>
-                  ))}
+                <div className="relative max-w-md">
+                  <select
+                    value={industry}
+                    onChange={e => setIndustry(e.target.value)}
+                    className="w-full appearance-none bg-[#f1f3ff] border-0 border-b-2 border-transparent focus:border-[#006190] focus:ring-0 focus:bg-white transition-all px-3 py-3 pr-10 text-[#141b2c] font-medium rounded-lg outline-none cursor-pointer"
+                  >
+                    {INDUSTRY_OPTIONS.map(opt => (
+                      <option key={opt} value={opt}>{opt}</option>
+                    ))}
+                  </select>
+                  <ChevronRight className="w-4 h-4 text-slate-400 absolute right-3 top-1/2 -translate-y-1/2 rotate-90 pointer-events-none" />
                 </div>
               </div>
             </div>
@@ -974,8 +1266,8 @@ export const IdeaEntry: React.FC = () => {
             </span>
           )}
         </div>
-        {/* QA status + attempts + reset */}
-        <div className="flex items-center gap-3 flex-shrink-0">
+        {/* QA status + exports + reset */}
+        <div className="flex items-center gap-2 flex-shrink-0 flex-wrap">
           <div className={cn(
             'inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold',
             qaPass
@@ -988,6 +1280,75 @@ export const IdeaEntry: React.FC = () => {
           <span className="text-xs text-slate-400 hidden sm:block">
             {attempts} attempt{attempts !== 1 ? 's' : ''}
           </span>
+
+          <div className="relative">
+            <button
+              onClick={() => setShowExportMenu(v => !v)}
+              className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-600 hover:text-slate-800 px-3 py-1.5 rounded-xl hover:bg-slate-100 transition-colors border border-slate-200"
+            >
+              <Share2 className="w-3.5 h-3.5" />
+              Share
+            </button>
+            {showExportMenu && (
+              <>
+                <div className="fixed inset-0 z-10" onClick={() => setShowExportMenu(false)} />
+                <div className="absolute right-0 top-full mt-1.5 z-20 bg-white border border-slate-200 rounded-xl shadow-lg py-1 w-52 text-sm">
+                  <button onClick={handleExportMarkdown} className="w-full flex items-center gap-2.5 px-4 py-2.5 hover:bg-slate-50 transition-colors text-left">
+                    <FileDown className="w-4 h-4 text-accent-600 flex-shrink-0" />
+                    <div>
+                      <p className="font-semibold text-slate-800">Download Markdown</p>
+                      <p className="text-[10px] text-slate-400">.md file</p>
+                    </div>
+                  </button>
+                  <button onClick={handleExportHTML} className="w-full flex items-center gap-2.5 px-4 py-2.5 hover:bg-slate-50 transition-colors text-left">
+                    <FileCode2 className="w-4 h-4 text-accent-600 flex-shrink-0" />
+                    <div>
+                      <p className="font-semibold text-slate-800">Download HTML</p>
+                      <p className="text-[10px] text-slate-400">Styled standalone page</p>
+                    </div>
+                  </button>
+                  <div className="border-t border-slate-100 my-1" />
+                  <button onClick={handlePrintPDF} className="w-full flex items-center gap-2.5 px-4 py-2.5 hover:bg-slate-50 transition-colors text-left">
+                    <Printer className="w-4 h-4 text-slate-500 flex-shrink-0" />
+                    <div>
+                      <p className="font-semibold text-slate-800">Print / Save as PDF</p>
+                      <p className="text-[10px] text-slate-400">Use browser print dialog</p>
+                    </div>
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+
+          {analysisId && (
+            <div className="flex items-center gap-1">
+              <button
+                onClick={() => handleExport('pdf')}
+                className="inline-flex items-center gap-1.5 text-xs font-semibold text-rose-700 hover:text-rose-800 px-3 py-1.5 rounded-xl hover:bg-rose-50 border border-rose-200 transition-colors"
+                title="Download as PDF"
+              >
+                <FileType className="w-3.5 h-3.5" />
+                PDF
+              </button>
+              <button
+                onClick={() => handleExport('html')}
+                className="inline-flex items-center gap-1.5 text-xs font-semibold text-sky-700 hover:text-sky-800 px-3 py-1.5 rounded-xl hover:bg-sky-50 border border-sky-200 transition-colors"
+                title="Download as standalone HTML"
+              >
+                <FileCode className="w-3.5 h-3.5" />
+                HTML
+              </button>
+              <button
+                onClick={() => handleExport('markdown')}
+                className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-700 hover:text-slate-800 px-3 py-1.5 rounded-xl hover:bg-slate-50 border border-slate-200 transition-colors"
+                title="Download raw Markdown"
+              >
+                <FileText className="w-3.5 h-3.5" />
+                Markdown
+              </button>
+            </div>
+          )}
+
           <button
             onClick={handleReset}
             className="inline-flex items-center gap-1.5 text-xs font-semibold text-accent-600 hover:text-accent-700 px-3 py-1.5 rounded-xl hover:bg-accent-50 transition-colors"
